@@ -333,8 +333,21 @@ def capture_voice(delay_ms: int = 0, record_ms: int = 4500):
         await new Promise((resolve) => {{
             const go = async () => {{
                 try {{
-                    if (!navigator.mediaDevices || !window.MediaRecorder) {{ resolve(""); return; }}
-                    const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+                    if (!navigator.mediaDevices || !window.MediaRecorder) {{
+                        console.error("AI Driver App: mic unsupported - no mediaDevices/MediaRecorder in this browser");
+                        resolve(""); return;
+                    }}
+                    let stream;
+                    try {{
+                        stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+                    }} catch (permErr) {{
+                        // Surfaced to the browser console instead of swallowed, so the
+                        // actual reason (permission denied, no device, in use by
+                        // another app, insecure context, etc) is visible for real
+                        // debugging instead of just "nothing happens".
+                        console.error("AI Driver App: getUserMedia failed -", permErr.name, permErr.message);
+                        resolve(""); return;
+                    }}
                     const mimeType = MediaRecorder.isTypeSupported('audio/webm')
                         ? 'audio/webm' : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
                     const recorder = mimeType ? new MediaRecorder(stream, {{ mimeType }}) : new MediaRecorder(stream);
@@ -355,7 +368,7 @@ def capture_voice(delay_ms: int = 0, record_ms: int = 4500):
                     recorder.onerror = () => {{ stream.getTracks().forEach(t => t.stop()); resolve(""); }};
                     recorder.start();
                     setTimeout(() => {{ if (recorder.state !== 'inactive') recorder.stop(); }}, {record_ms});
-                }} catch (e) {{ resolve(""); }}
+                }} catch (e) {{ console.error("AI Driver App: capture_voice failed -", e.name, e.message); resolve(""); }}
             }};
             setTimeout(go, {delay_ms});
         }});
@@ -386,7 +399,7 @@ def request_browser_location():
             if (!navigator.geolocation) { resolve(""); return; }
             navigator.geolocation.getCurrentPosition(
                 (pos) => resolve(pos.coords.latitude + "," + pos.coords.longitude),
-                () => resolve(""),
+                (err) => { console.error("AI Driver App: geolocation failed -", err.code, err.message); resolve(""); },
                 { timeout: 8000, maximumAge: 300000 }
             );
         });
@@ -471,6 +484,11 @@ def ask_companion(client: genai.Client, history: list, user_text: str, pulse_con
                 config=genai_types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
                     max_output_tokens=200,
+                    # Live Google Search grounding - still free tier, no extra
+                    # key - so she can actually answer "what's in the news" or
+                    # "what's the weather like" with real current information
+                    # instead of guessing from stale training data.
+                    tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
                 ),
             )
             return (response.text or "").strip()
