@@ -209,21 +209,39 @@ def speak(text: str, hands_free: bool = False):
 # back on rerun. Falls back to a plain text box if the browser has no
 # SpeechRecognition support (e.g. desktop Firefox, iOS Safari).
 # -----------------------------------------------------------------------
-def mic_button(auto_start: bool = False):
+def mic_button(auto_start: bool = False, accent: str = "#00C2FF"):
+    mic_svg = (
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
+        '<rect x="9" y="2" width="6" height="12" rx="3" fill="white"/>'
+        '<path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="white" stroke-width="2" '
+        'stroke-linecap="round" fill="none"/></svg>'
+    )
     components.html(
         f"""
-        <div style="display:flex; justify-content:center; padding:8px 0;">
+        <style>
+        @keyframes mic-pulse {{
+            0%   {{ box-shadow: 0 0 0 0 {accent}80, 0 4px 14px rgba(0,0,0,0.4); }}
+            70%  {{ box-shadow: 0 0 0 16px {accent}00, 0 4px 14px rgba(0,0,0,0.4); }}
+            100% {{ box-shadow: 0 0 0 0 {accent}00, 0 4px 14px rgba(0,0,0,0.4); }}
+        }}
+        #mic-btn {{ animation: mic-pulse 2.4s ease-out infinite; }}
+        #mic-btn:hover {{ filter: brightness(1.1); }}
+        </style>
+        <div style="display:flex; justify-content:center; padding:8px 0; font-family:'Inter',sans-serif;">
           <button id="mic-btn" style="
-              font-size:20px; padding:14px 28px; border-radius:999px;
-              border:none; background:#d6336c; color:white; cursor:pointer;">
-            🎤 Hold to talk
+              display:flex; align-items:center; gap:10px;
+              font-size:14px; font-weight:600; letter-spacing:0.03em; text-transform:uppercase;
+              padding:13px 26px; border-radius:8px;
+              border:none; background:{accent}; color:white; cursor:pointer;">
+            {mic_svg}<span id="mic-label">Tap to talk</span>
           </button>
         </div>
         <script>
         const btn = document.getElementById('mic-btn');
+        const label = document.getElementById('mic-label');
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {{
-            btn.innerText = "🎤 Voice not supported - type below";
+            label.innerText = "Voice not supported - type below";
             btn.disabled = true;
         }} else {{
             const rec = new SpeechRecognition();
@@ -231,7 +249,7 @@ def mic_button(auto_start: bool = False):
             rec.interimResults = false;
             rec.maxAlternatives = 1;
             const startListening = () => {{
-                btn.innerText = "🎙️ Listening...";
+                label.innerText = "Listening...";
                 try {{ rec.start(); }} catch (e) {{}}
             }};
             btn.addEventListener('click', startListening);
@@ -242,8 +260,8 @@ def mic_button(auto_start: bool = False):
                 url.searchParams.set('voice', transcript);
                 window.top.location.href = url.toString();
             }};
-            rec.onerror = () => {{ btn.innerText = "🎤 Hold to talk"; }};
-            rec.onend = () => {{ btn.innerText = "🎤 Hold to talk"; }};
+            rec.onerror = () => {{ label.innerText = "Tap to talk"; }};
+            rec.onend = () => {{ label.innerText = "Tap to talk"; }};
             if ({str(auto_start).lower()}) {{ startListening(); }}
         }}
         </script>
@@ -340,10 +358,32 @@ if "last_error" not in st.session_state:
     st.session_state.last_error = None
 
 # -----------------------------------------------------------------------
+# BRAND THEMING - a browser page has no API that can read what car it's
+# plugged into (that data is only exposed to native Android Auto apps, not
+# websites), so this is the honest substitute: the driver picks their make
+# once, and the whole UI re-tints to that brand's signature color instead
+# of a generic one-size palette.
+# -----------------------------------------------------------------------
+BRAND_ACCENTS = {
+    "Generic / Any car": {"accent": "#00C2FF", "accent2": "#7C8CFF"},
+    "BMW":       {"accent": "#0066B1", "accent2": "#4FA8E0"},
+    "Mercedes-Benz": {"accent": "#8BC4C0", "accent2": "#00A19A"},
+    "Audi":      {"accent": "#BB0A30", "accent2": "#E63950"},
+    "Tesla":     {"accent": "#E82127", "accent2": "#FF5C5C"},
+    "Toyota":    {"accent": "#EB0A1E", "accent2": "#FF4D5E"},
+    "Volkswagen": {"accent": "#001E50", "accent2": "#4A90E2"},
+    "Ford":      {"accent": "#00274E", "accent2": "#3F8CFF"},
+    "Porsche":   {"accent": "#D5001C", "accent2": "#FF4655"},
+}
+
+if "brand" not in st.session_state:
+    st.session_state.brand = "Generic / Any car"
+
+# -----------------------------------------------------------------------
 # SIDEBAR - API key + live map + controls
 # -----------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### 🔑 Setup")
+    st.markdown("### SETUP")
     api_key = st.text_input(
         "Gemini API key (free)",
         type="password",
@@ -351,18 +391,25 @@ with st.sidebar:
         help="Get one free at aistudio.google.com/apikey - no credit card needed. "
              "Set GEMINI_API_KEY in your HF Space secrets to skip typing this.",
     )
+    st.session_state.brand = st.selectbox(
+        "Your car",
+        options=list(BRAND_ACCENTS.keys()),
+        index=list(BRAND_ACCENTS.keys()).index(st.session_state.brand),
+        help="A browser page can't detect what car it's plugged into - pick your make "
+             "and the app re-themes to match it.",
+    )
     st.session_state.hands_free = st.toggle(
-        "🙌 Hands-free mode",
+        "Hands-free mode",
         value=st.session_state.hands_free,
         help="Mic reopens automatically after she replies, so you never touch the screen mid-drive.",
     )
-    if st.button("🗑️ Clear conversation"):
+    if st.button("Clear conversation"):
         st.session_state.history = []
         st.session_state.last_dest = None
         st.rerun()
 
     st.divider()
-    st.markdown("### 🗺️ Live Map")
+    st.markdown("### LIVE MAP")
     if st.session_state.last_dest:
         components.iframe(maps_embed_url(st.session_state.last_dest), height=350)
     else:
@@ -373,115 +420,187 @@ with st.sidebar:
         st.caption(f"⚠️ Last API error: {st.session_state.last_error}")
 
 # -----------------------------------------------------------------------
-# THEME - dark, glassmorphic, gradient-accented. Pure CSS injected via
+# THEME - flat, high-contrast, single-accent "OEM infotainment" look
+# (think Tesla/BMW digital cockpit, not a consumer gradient app). Accent
+# color comes from the brand picked in the sidebar. Pure CSS injected via
 # st.markdown; no external stylesheet needed so it stays $0/dependency-free.
 # -----------------------------------------------------------------------
+_accent = BRAND_ACCENTS[st.session_state.brand]["accent"]
+_accent2 = BRAND_ACCENTS[st.session_state.brand]["accent2"]
+
 st.markdown(
-    """
+    f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap');
 
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
 
-    .stApp {
+    .stApp {{
         background:
-            radial-gradient(circle at 15% 0%, rgba(214,51,108,0.25), transparent 45%),
-            radial-gradient(circle at 85% 15%, rgba(90,60,220,0.25), transparent 45%),
-            linear-gradient(180deg, #0b0b14 0%, #14121f 100%);
-        color: #f2f0f8;
-    }
+            radial-gradient(ellipse 900px 420px at 20% -5%, {_accent}22, transparent 60%),
+            #0a0b0d;
+        color: #eef0f3;
+    }}
 
-    section[data-testid="stSidebar"] {
-        background: rgba(255,255,255,0.03);
-        border-right: 1px solid rgba(255,255,255,0.08);
-    }
-    section[data-testid="stSidebar"] * { color: #f2f0f8 !important; }
+    @keyframes adx-pulse {{
+        0%   {{ box-shadow: 0 0 0 0 {_accent}66, 0 4px 14px rgba(0,0,0,0.4); }}
+        70%  {{ box-shadow: 0 0 0 14px {_accent}00, 0 4px 14px rgba(0,0,0,0.4); }}
+        100% {{ box-shadow: 0 0 0 0 {_accent}00, 0 4px 14px rgba(0,0,0,0.4); }}
+    }}
+    @keyframes adx-blink {{
+        0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.35; }}
+    }}
 
-    h1, h2, h3 { font-family: 'Poppins', sans-serif !important; }
+    section[data-testid="stSidebar"] {{
+        background: #101215;
+        border-right: 1px solid #202329;
+    }}
+    section[data-testid="stSidebar"] * {{ color: #eef0f3 !important; }}
+    section[data-testid="stSidebar"] h3 {{
+        font-family: 'Poppins', sans-serif !important; font-weight: 700 !important;
+        font-size: 0.78rem !important; letter-spacing: 0.14em !important;
+        color: {_accent} !important; margin-top: 4px;
+    }}
 
-    .adx-hero {
+    h1, h2, h3 {{ font-family: 'Poppins', sans-serif !important; }}
+
+    .adx-hero {{
         display: flex; align-items: center; gap: 14px;
-        margin-bottom: 4px;
-    }
-    .adx-hero .emoji {
-        font-size: 42px;
-        filter: drop-shadow(0 0 18px rgba(214,51,108,0.55));
-    }
-    .adx-hero h1 {
-        margin: 0; font-size: 2.1rem; font-weight: 700;
-        background: linear-gradient(90deg, #ff5f8f, #b18cff 60%, #6ea8ff);
-        -webkit-background-clip: text; background-clip: text; color: transparent;
-    }
-    .adx-subtitle { color: #a9a4c4; margin: 2px 0 28px 0; font-size: 0.98rem; }
+        margin-bottom: 2px; padding-bottom: 18px;
+        border-bottom: 1px solid #1c1f25;
+    }}
+    .adx-hero h1 {{
+        margin: 0; font-size: 1.9rem; font-weight: 800; letter-spacing: -0.01em;
+        color: #ffffff;
+    }}
+    .adx-hero h1 .accent {{ color: {_accent}; }}
+    .adx-subtitle {{
+        color: #8a8f99; margin: 10px 0 26px 0; font-size: 0.92rem;
+        text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;
+        display: flex; align-items: center; gap: 8px;
+    }}
+    .adx-status-dot {{
+        width: 8px; height: 8px; border-radius: 50%;
+        background: {_accent}; box-shadow: 0 0 8px {_accent};
+        animation: adx-blink 1.8s ease-in-out infinite;
+    }}
 
-    .adx-card {
-        background: rgba(255,255,255,0.045);
-        border: 1px solid rgba(255,255,255,0.09);
-        border-radius: 18px;
-        padding: 22px 22px 18px 22px;
-        backdrop-filter: blur(10px);
-        box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+    .adx-card {{
+        background: #121417;
+        border: 1px solid #22262d;
+        border-top: 3px solid {_accent};
+        border-radius: 10px;
+        padding: 20px 20px 18px 20px;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.35);
         min-height: 120px;
-    }
-    .adx-card h3 {
-        margin: 0 0 14px 0; font-size: 1.05rem; letter-spacing: 0.02em;
-        color: #ffffff; display: flex; align-items: center; gap: 8px;
-    }
-    .adx-empty {
-        color: #9891b8; font-size: 0.92rem; line-height: 1.5;
-        border: 1px dashed rgba(255,255,255,0.15);
-        border-radius: 12px; padding: 14px 16px;
-    }
+    }}
+    .adx-card h3 {{
+        margin: 0 0 16px 0; font-size: 0.8rem; font-weight: 700;
+        letter-spacing: 0.12em; text-transform: uppercase;
+        color: #ffffff; display: flex; align-items: center; gap: 9px;
+    }}
+    .adx-empty {{
+        color: #767c88; font-size: 0.92rem; line-height: 1.5;
+        border: 1px solid #22262d;
+        background: #0e1013;
+        border-radius: 8px; padding: 14px 16px;
+    }}
 
-    .adx-bubble {
-        border-radius: 14px; padding: 11px 15px; margin-bottom: 10px;
+    .adx-bubble {{
+        border-radius: 8px; padding: 11px 15px; margin-bottom: 10px;
         font-size: 0.94rem; line-height: 1.45; max-width: 92%;
-    }
-    .adx-bubble.user {
-        background: rgba(110,168,255,0.14); border: 1px solid rgba(110,168,255,0.25);
-        margin-left: auto; text-align: right; color: #d7e6ff;
-    }
-    .adx-bubble.assistant {
-        background: linear-gradient(135deg, rgba(214,51,108,0.18), rgba(177,140,255,0.14));
-        border: 1px solid rgba(214,51,108,0.3);
-        margin-right: auto; color: #ffe1ec;
-    }
-    .adx-bubble .tag {
-        display: block; font-size: 0.68rem; text-transform: uppercase;
-        letter-spacing: 0.08em; opacity: 0.6; margin-bottom: 3px;
-    }
+        background: #191c21; border: 1px solid #262a31; color: #e4e6ea;
+    }}
+    .adx-bubble.user {{
+        margin-left: auto; text-align: right;
+        border-right: 3px solid #3a3f48;
+    }}
+    .adx-bubble.assistant {{
+        margin-right: auto;
+        border-left: 3px solid {_accent};
+    }}
+    .adx-bubble .tag {{
+        display: block; font-size: 0.66rem; text-transform: uppercase;
+        letter-spacing: 0.1em; font-weight: 700; opacity: 0.65; margin-bottom: 4px;
+        color: {_accent};
+    }}
 
     /* Streamlit chat input */
-    [data-testid="stChatInput"] textarea {
-        background: rgba(255,255,255,0.05) !important;
-        border: 1px solid rgba(255,255,255,0.12) !important;
-        border-radius: 14px !important; color: #f2f0f8 !important;
-    }
+    [data-testid="stChatInput"] textarea {{
+        background: #121417 !important;
+        border: 1px solid #262a31 !important;
+        border-radius: 10px !important; color: #eef0f3 !important;
+    }}
+    [data-testid="stChatInput"]:focus-within {{
+        border-color: {_accent} !important;
+    }}
 
-    .stButton > button, .stLinkButton > a {
-        border-radius: 12px !important;
-        border: 1px solid rgba(255,255,255,0.15) !important;
-        background: rgba(255,255,255,0.05) !important;
-        color: #f2f0f8 !important;
-    }
-    .stButton > button:hover, .stLinkButton > a:hover {
-        border-color: rgba(214,51,108,0.6) !important;
-        color: #ff8fb2 !important;
-    }
+    .stButton > button, .stLinkButton > a {{
+        border-radius: 8px !important;
+        border: 1px solid #262a31 !important;
+        background: #16181c !important;
+        color: #eef0f3 !important;
+        font-weight: 600 !important;
+    }}
+    .stButton > button:hover, .stLinkButton > a:hover {{
+        border-color: {_accent} !important;
+        color: {_accent} !important;
+    }}
 
-    iframe { border-radius: 14px !important; }
+    .stSelectbox [data-baseweb="select"] > div {{
+        background: #121417 !important; border-color: #262a31 !important;
+    }}
+    .stToggle [data-baseweb="checkbox"] div[aria-checked="true"] {{
+        background: {_accent} !important;
+    }}
+
+    iframe {{ border-radius: 10px !important; }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # -----------------------------------------------------------------------
+# ICONS - minimal line-art SVGs (stroke = currentColor) instead of emoji,
+# for a cleaner, more premium look against the dark glass UI.
+# -----------------------------------------------------------------------
+def _icon_car(color: str) -> str:
+    return f"""<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M7 29L10.5 18.5C11.2 16.4 13.1 15 15.3 15H32.7C34.9 15 36.8 16.4 37.5 18.5L41 29"
+stroke="{color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="5" y="29" width="38" height="9" rx="3.5" stroke="{color}" stroke-width="2.4"/>
+<circle cx="14" cy="38" r="3.2" stroke="{color}" stroke-width="2.4" fill="#0a0b0d"/>
+<circle cx="34" cy="38" r="3.2" stroke="{color}" stroke-width="2.4" fill="#0a0b0d"/>
+<path d="M14 21.5H34" stroke="{color}" stroke-width="2.2" stroke-linecap="round"/>
+</svg>"""
+
+def _icon_map(color: str) -> str:
+    return f"""<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12 21s-7-6.1-7-11.5C5 5.9 8.1 3 12 3s7 2.9 7 6.5C19 14.9 12 21 12 21z"
+stroke="{color}" stroke-width="1.8" stroke-linejoin="round"/>
+<circle cx="12" cy="9.5" r="2.4" stroke="{color}" stroke-width="1.8"/>
+</svg>"""
+
+def _icon_chat(color: str) -> str:
+    return f"""<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M4 5.5C4 4.7 4.7 4 5.5 4h13c.8 0 1.5.7 1.5 1.5v10c0 .8-.7 1.5-1.5 1.5H9l-4 3.5v-3.5H5.5C4.7 16.5 4 15.8 4 15V5.5z"
+stroke="{color}" stroke-width="1.8" stroke-linejoin="round"/>
+</svg>"""
+
+ICON_CAR = _icon_car(_accent)
+ICON_MAP = _icon_map(_accent)
+ICON_CHAT = _icon_chat(_accent)
+
+def icon_span(svg: str, size: int = 22) -> str:
+    return f'<span style="display:inline-flex; width:{size}px; height:{size}px; vertical-align:-5px;">{svg}</span>'
+
+# -----------------------------------------------------------------------
 # MAIN LAYOUT
 # -----------------------------------------------------------------------
 st.markdown(
-    """
-    <div class="adx-hero"><span class="emoji">🚗</span><h1>AI Driver App</h1></div>
-    <div class="adx-subtitle">Your voice-driven companion for the road.</div>
+    f"""
+    <div class="adx-hero">{icon_span(ICON_CAR, 44)}<h1>AI <span class="accent">DRIVER</span></h1></div>
+    <div class="adx-subtitle"><span class="adx-status-dot"></span>Online &middot; {st.session_state.brand} companion mode</div>
     """,
     unsafe_allow_html=True,
 )
@@ -489,7 +608,7 @@ st.markdown(
 col_map, col_chat = st.columns([1, 1])
 
 with col_map:
-    st.markdown('<div class="adx-card"><h3>🗺️ Navigation</h3>', unsafe_allow_html=True)
+    st.markdown(f'<div class="adx-card"><h3>{icon_span(ICON_MAP, 19)} Navigation</h3>', unsafe_allow_html=True)
     if st.session_state.last_dest:
         st.components.v1.iframe(maps_embed_url(st.session_state.last_dest), height=380)
         st.link_button("Open in Maps app", maps_url(st.session_state.last_dest))
@@ -502,7 +621,7 @@ with col_map:
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col_chat:
-    st.markdown('<div class="adx-card"><h3>💬 Chat</h3>', unsafe_allow_html=True)
+    st.markdown(f'<div class="adx-card"><h3>{icon_span(ICON_CHAT, 19)} Chat</h3>', unsafe_allow_html=True)
     if not st.session_state.history:
         st.markdown(
             '<div class="adx-empty">Say hello, ask her anything, or ask for directions / music.</div>',
@@ -526,7 +645,7 @@ with col_chat:
     # initial mic-permission prompt.
     first_load_auto = st.session_state.hands_free and not st.session_state.history and not voice_text
 
-    mic_button(auto_start=auto_relisten or first_load_auto)
+    mic_button(auto_start=auto_relisten or first_load_auto, accent=_accent)
 
     typed_text = st.chat_input("Or type here...")
 
