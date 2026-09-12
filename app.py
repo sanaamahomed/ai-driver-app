@@ -334,19 +334,19 @@ def capture_voice(delay_ms: int = 0, record_ms: int = 4500):
             const go = async () => {{
                 try {{
                     if (!navigator.mediaDevices || !window.MediaRecorder) {{
-                        console.error("AI Driver App: mic unsupported - no mediaDevices/MediaRecorder in this browser");
-                        resolve(""); return;
+                        resolve("ERR|Unsupported|This browser can't record audio."); return;
                     }}
                     let stream;
                     try {{
                         stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
                     }} catch (permErr) {{
-                        // Surfaced to the browser console instead of swallowed, so the
-                        // actual reason (permission denied, no device, in use by
-                        // another app, insecure context, etc) is visible for real
-                        // debugging instead of just "nothing happens".
-                        console.error("AI Driver App: getUserMedia failed -", permErr.name, permErr.message);
-                        resolve(""); return;
+                        // Resolved as a tagged "ERR|..." string instead of silently
+                        // swallowed - capture_voice()'s caller turns this into a real
+                        // st.error() shown right in the app, so ANY visitor sees the
+                        // actual cause (blocked permission, no mic, etc), not just a
+                        // dead button - this has to work for strangers, not just
+                        // someone who knows to open DevTools.
+                        resolve("ERR|" + permErr.name + "|" + (permErr.message || "Microphone access failed.")); return;
                     }}
                     const mimeType = MediaRecorder.isTypeSupported('audio/webm')
                         ? 'audio/webm' : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
@@ -360,21 +360,25 @@ def capture_voice(delay_ms: int = 0, record_ms: int = 4500):
                         const reader = new FileReader();
                         reader.onloadend = () => {{
                             const b64 = reader.result.split(',')[1] || "";
-                            resolve(b64 ? (blob.type + "|" + b64) : "");
+                            resolve(b64 ? ("OK|" + blob.type + "|" + b64) : "");
                         }};
-                        reader.onerror = () => resolve("");
+                        reader.onerror = () => resolve("ERR|ReadError|Couldn't process the recording.");
                         reader.readAsDataURL(blob);
                     }};
-                    recorder.onerror = () => {{ stream.getTracks().forEach(t => t.stop()); resolve(""); }};
+                    recorder.onerror = () => {{
+                        stream.getTracks().forEach(t => t.stop());
+                        resolve("ERR|RecordingError|Recording failed partway through.");
+                    }};
                     recorder.start();
                     setTimeout(() => {{ if (recorder.state !== 'inactive') recorder.stop(); }}, {record_ms});
-                }} catch (e) {{ console.error("AI Driver App: capture_voice failed -", e.name, e.message); resolve(""); }}
+                }} catch (e) {{ resolve("ERR|" + (e.name || "Unknown") + "|" + (e.message || "Something went wrong.")); }}
             }};
             setTimeout(go, {delay_ms});
         }});
         """
     )
-    return result  # None = still pending; str = resolved (possibly "")
+    return result  # None/0 = still pending; "" = heard nothing (not an error);
+    # "OK|<mime>|<base64>" = got audio; "ERR|<name>|<message>" = a real failure
 
 
 # -----------------------------------------------------------------------
@@ -427,6 +431,21 @@ def reverse_geocode(lat: str, lon: str) -> str:
     except requests.exceptions.RequestException:
         pass
     return ""
+
+
+def describe_mic_error(name: str, message: str) -> str:
+    """Turns a raw browser error name into something a non-technical driver
+    can actually act on, instead of a bare DOMException name."""
+    plain = {
+        "NotAllowedError": "Microphone access is blocked for this site. Tap the padlock/site-info "
+                            "icon next to the address bar, open Permissions, and set Microphone to Allow.",
+        "NotFoundError": "No microphone was found on this device.",
+        "NotReadableError": "Another app is already using the microphone right now - close it and try again.",
+        "SecurityError": "This page isn't allowed to use the microphone (usually means it's not loaded over a secure https:// connection).",
+        "AbortError": "The recording was interrupted before it finished.",
+        "Unsupported": "This browser can't record audio - try Chrome or Safari instead.",
+    }
+    return plain.get(name, message or "Something stopped the microphone from working.")
 
 
 def transcribe_audio(client: "genai.Client", mime_type: str, audio_b64: str) -> str:
@@ -945,11 +964,19 @@ with col_chat:
             if isinstance(result, str):
                 st.session_state.listening = False
                 st.session_state.pending_capture = False
-                if result and "|" in result:
-                    mime_type, audio_b64 = result.split("|", 1)
-                    voice_text = transcribe_audio(get_client(api_key), mime_type, audio_b64)
-                if not voice_text:
-                    st.rerun()  # heard nothing (or no mic access) - stop listening cleanly, no ghost turn
+                if result.startswith("ERR|"):
+                    # Deliberately NOT calling st.rerun() here - this error needs to
+                    # actually stay on screen for the driver to read, not vanish the
+                    # instant we rerun. The mic button just reverts to normal on
+                    # their next tap since listening is already False.
+                    _, err_name, err_message = result.split("|", 2)
+                    st.error(f"🎤 Mic error ({err_name}): {describe_mic_error(err_name, err_message)}")
+                else:
+                    if result.startswith("OK|"):
+                        _, mime_type, audio_b64 = result.split("|", 2)
+                        voice_text = transcribe_audio(get_client(api_key), mime_type, audio_b64)
+                    if not voice_text:
+                        st.rerun()  # heard nothing - stop listening cleanly, no ghost turn
     else:
         if st.button("🎤 Tap to talk", use_container_width=True):
             st.session_state.mic_unlocked = True
