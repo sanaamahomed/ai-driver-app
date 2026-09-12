@@ -195,9 +195,13 @@ def synthesize_elevenlabs(text: str, api_key: str) -> bytes | None:
             timeout=15,
         )
         if resp.status_code == 200:
+            st.session_state.last_tts_error = None
             return resp.content
-    except requests.exceptions.RequestException:
-        pass
+        # Surface exactly why it failed instead of silently falling back to
+        # the robotic browser voice with no explanation.
+        st.session_state.last_tts_error = f"ElevenLabs {resp.status_code}: {resp.text[:200]}"
+    except requests.exceptions.RequestException as e:
+        st.session_state.last_tts_error = f"ElevenLabs request failed: {e}"
     return None
 
 
@@ -435,6 +439,8 @@ if "hands_free" not in st.session_state:
     st.session_state.hands_free = True  # on by default - she keeps listening without repeated taps
 if "last_error" not in st.session_state:
     st.session_state.last_error = None
+if "last_tts_error" not in st.session_state:
+    st.session_state.last_tts_error = None
 
 # -----------------------------------------------------------------------
 # BRAND THEMING - a browser page has no API that can read what car it's
@@ -444,7 +450,7 @@ if "last_error" not in st.session_state:
 # of a generic one-size palette.
 # -----------------------------------------------------------------------
 BRAND_ACCENTS = {
-    "McLaren":   {"accent": "#FF8000", "accent2": "#1A1A1A"},  # papaya orange - McLaren's real signature color
+    "Racing Orange": {"accent": "#FF8000", "accent2": "#1A1A1A"},  # papaya orange + black
     "Generic / Any car": {"accent": "#5E77FF", "accent2": "#00D4C0"},
     "BMW":       {"accent": "#0066B1", "accent2": "#4FA8E0"},
     "Mercedes-Benz": {"accent": "#8BC4C0", "accent2": "#00A19A"},
@@ -454,10 +460,11 @@ BRAND_ACCENTS = {
     "Volkswagen": {"accent": "#001E50", "accent2": "#4A90E2"},
     "Ford":      {"accent": "#00274E", "accent2": "#3F8CFF"},
     "Porsche":   {"accent": "#D5001C", "accent2": "#FF4655"},
+    "Nissan":    {"accent": "#C3002F", "accent2": "#1A1A1A"},
 }
 
 if "brand" not in st.session_state:
-    st.session_state.brand = "McLaren"
+    st.session_state.brand = "Racing Orange"
 
 # -----------------------------------------------------------------------
 # SIDEBAR - API key + live map + controls
@@ -505,13 +512,17 @@ with st.sidebar:
 
     if st.session_state.last_error:
         st.divider()
-        st.caption(f"⚠️ Last API error: {st.session_state.last_error}")
+        st.caption(f"⚠️ Last Gemini error: {st.session_state.last_error}")
+
+    if st.session_state.last_tts_error:
+        st.divider()
+        st.caption(f"⚠️ Last voice error: {st.session_state.last_tts_error}")
 
 # -----------------------------------------------------------------------
-# THEME - solid vivid McLaren-papaya field with white floating cards.
-# Accent color comes from the brand picked in the sidebar. Pure CSS
-# injected via st.markdown; no external stylesheet needed so it stays
-# $0/dependency-free (Font Awesome icon font is the one CDN exception).
+# THEME - flat, high-contrast, single-accent "OEM infotainment" look
+# (think Tesla/BMW digital cockpit, not a consumer gradient app). Accent
+# color comes from the brand picked in the sidebar. Pure CSS injected via
+# st.markdown; no external stylesheet needed so it stays $0/dependency-free.
 # -----------------------------------------------------------------------
 _accent = BRAND_ACCENTS[st.session_state.brand]["accent"]
 _accent2 = BRAND_ACCENTS[st.session_state.brand]["accent2"]
@@ -533,15 +544,18 @@ st.markdown(
         color: #FFFFFF;
     }}
 
+    /* Black highlight, not just orange-into-black: a solid near-black
+       sidebar against the accent-colored main field, same split as a real
+       livery (black body, accent-color stripe) instead of one wash. */
     section[data-testid="stSidebar"] {{
-        background: {_accent};
-        border-right: 1px solid rgba(255,255,255,0.15);
+        background: #141414;
+        border-right: 2px solid {_accent};
     }}
     section[data-testid="stSidebar"] * {{ color: #FFFFFF !important; }}
     section[data-testid="stSidebar"] h3 {{
         font-family: 'Poppins', sans-serif !important; font-weight: 700 !important;
         font-size: 0.72rem !important; letter-spacing: 0.16em !important;
-        color: #E4E9FF !important; margin-top: 6px;
+        color: {_accent} !important; margin-top: 6px;
     }}
     section[data-testid="stSidebar"] input, section[data-testid="stSidebar"] [data-baseweb="select"] > div {{
         background: #FFFFFF !important; color: #1D1929 !important;
@@ -665,9 +679,8 @@ def icon_span(html: str) -> str:
     return f'<span style="display:inline-flex; align-items:center;">{html}</span>'
 
 def logo_badge(size: int = 52) -> str:
-    """Rounded-square gradient app-icon badge (McLaren papaya orange -> black),
-    holding a car glyph from Font Awesome - an original mark, not a reuse of
-    any third-party app icon."""
+    """Rounded-square gradient app-icon badge, holding a car glyph from Font
+    Awesome - an original mark, not a reuse of any third-party app icon."""
     inner = int(size * 0.5)
     return f"""<div style="
         width:{size}px; height:{size}px; border-radius:{size * 0.26}px;
