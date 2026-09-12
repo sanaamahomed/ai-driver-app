@@ -318,14 +318,16 @@ def render_speech(payload: dict | None):
 # in hands-free mode, so it doesn't record her own voice.
 # -----------------------------------------------------------------------
 def capture_voice(delay_ms: int = 0, record_ms: int = 4500):
-    """Returns None while the JS promise is still pending (st_javascript's
-    way of saying "not resolved yet on this rerun") - the CALLER must keep
-    re-invoking this on every subsequent rerun (same delay_ms/record_ms, so
-    the underlying JS code stays identical) until it gets back a real
-    string, or the resolved value is lost. Returns "" if recording wasn't
-    possible (unsupported browser, mic permission denied) or produced no
-    audio, or "<mime type>|<base64 audio>" if it recorded something -
-    transcribe_audio() below turns that into actual text."""
+    """Returns the int 0 while the JS promise is still pending (that's
+    st_javascript's hardcoded placeholder value, NOT None - checking for
+    None here was the actual bug that made the mic button look completely
+    dead) - the CALLER must keep re-invoking this on every subsequent rerun
+    (same delay_ms/record_ms, so the underlying JS code stays identical)
+    until it gets back a real string, or the resolved value is lost.
+    Returns "" if recording wasn't possible (unsupported browser, mic
+    permission denied) or produced no audio, or "<mime type>|<base64
+    audio>" if it recorded something - transcribe_audio() below turns that
+    into actual text."""
     result = st_javascript(
         f"""
         await new Promise((resolve) => {{
@@ -373,10 +375,11 @@ def capture_voice(delay_ms: int = 0, record_ms: int = 4500):
 # in" context, not for live navigation.
 # -----------------------------------------------------------------------
 def request_browser_location():
-    """Returns None while the JS promise is still pending (same
-    st_javascript contract as capture_voice() - the caller must keep
-    re-invoking this on every rerun until it gets a real string back).
-    Returns "" if location is unavailable/denied, or "lat,lon" once resolved."""
+    """Returns the int 0 while the JS promise is still pending (same
+    st_javascript quirk as capture_voice() - the caller must check
+    isinstance(result, str), not `is not None`, and keep re-invoking this
+    on every rerun until it gets a real string back). Returns "" if
+    location is unavailable/denied, or "lat,lon" once resolved."""
     return st_javascript(
         """
         await new Promise((resolve) => {
@@ -547,7 +550,13 @@ if "last_music_query" not in st.session_state:
 # lookup resolves, then never again this session.
 if not st.session_state.location_lookup_done:
     _loc_result = request_browser_location()
-    if _loc_result is not None:
+    # st_javascript() returns the int 0 (not None) as its placeholder value
+    # while the JS promise is still pending - our real resolved value is
+    # always a string (possibly ""), so that's the correct "did it resolve
+    # yet" check here. Checking `is not None` instead (as this used to)
+    # made every call look "resolved" on the very first render, before the
+    # browser's location prompt ever had a chance to fire.
+    if isinstance(_loc_result, str):
         st.session_state.location_lookup_done = True
         if _loc_result:
             _lat, _lon = _loc_result.split(",", 1)
@@ -909,7 +918,13 @@ with col_chat:
             delay_ms = min(max(st.session_state.last_reply_words * 350, 900), 6000) \
                 if st.session_state.pending_capture else 0
             result = capture_voice(delay_ms=delay_ms)
-            if result is not None:
+            # Same st_javascript quirk as request_browser_location() above:
+            # its pending placeholder is the int 0, not None. Checking
+            # `is not None` treated that placeholder as an already-resolved
+            # empty result on the very first render - before the recording
+            # even started - which is why tapping the button looked like it
+            # did literally nothing.
+            if isinstance(result, str):
                 st.session_state.listening = False
                 st.session_state.pending_capture = False
                 if result and "|" in result:
