@@ -21,9 +21,11 @@ rate-limit file below are all adapted straight from the SignalQA AI QA System
 import re
 import json
 import time
+import base64
 from datetime import datetime
 from pathlib import Path
 
+import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
@@ -44,6 +46,13 @@ st.set_page_config(page_title="AI Driver App", page_icon="🚗", layout="wide")
 GEMINI_MODEL = "gemini-3.5-flash-lite"  # matches SignalQA's free-tier model choice
 MAX_HISTORY_TURNS = 12  # cap what we send to Gemini so each reply stays fast and small
 VAULT_PATH = Path(__file__).parent / "conversation_vault.json"
+
+# ElevenLabs free tier: 10,000 characters/month, no card required - far more
+# natural than the browser's built-in voice. "Rachel" is one of ElevenLabs'
+# stock warm female voices; swap ELEVENLABS_VOICE_ID for any voice id from
+# your own Voice Library if you'd rather use a different one.
+ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
+ELEVENLABS_TTS_URL = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
 
 # Gemini's free tier caps requests/day per API key. This keeps the whole
 # app - across every visitor on a shared link - under that ceiling so it
@@ -163,19 +172,64 @@ def open_url_in_native_app(url: str):
 
 
 # -----------------------------------------------------------------------
-# BROWSER TEXT-TO-SPEECH ($0 - runs on-device, streams over car Bluetooth)
-# When hands_free is on, restarts the mic automatically once she finishes
-# speaking, so the driver never has to touch the screen mid-conversation.
+# TEXT-TO-SPEECH
+# Primary: ElevenLabs (free tier, 10k chars/month, natural voice) - the
+# server fetches the mp3 and hands it to the browser as base64 so the key
+# never reaches client-side JS. Falls back to the browser's built-in
+# speechSynthesis (still $0, just more robotic) if no ElevenLabs key is
+# set or the call fails for any reason - the drive never goes silent.
 # -----------------------------------------------------------------------
-def speak(text: str, hands_free: bool = False):
+def synthesize_elevenlabs(text: str, api_key: str) -> bytes | None:
+    try:
+        resp = requests.post(
+            ELEVENLABS_TTS_URL,
+            headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+            json={
+                "text": text,
+                "model_id": "eleven_multilingual_v2",
+                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return resp.content
+    except requests.exceptions.RequestException:
+        pass
+    return None
+
+
+def speak(text: str, hands_free: bool = False, elevenlabs_key: str = ""):
     safe_text = json.dumps(text)
-    auto_relisten = """
-            utter.onend = () => {
+    auto_relisten_js = """
+            const relisten = () => {
                 const url = new URL(window.top.location.href);
                 url.searchParams.set('relisten', '1');
                 setTimeout(() => { window.top.location.href = url.toString(); }, 400);
             };
-    """ if hands_free else ""
+    """ if hands_free else "const relisten = () => {};"
+    relisten_call = "relisten();" if hands_free else ""
+
+    audio_bytes = synthesize_elevenlabs(text, elevenlabs_key) if elevenlabs_key else None
+
+    if audio_bytes:
+        b64 = base64.b64encode(audio_bytes).decode()
+        components.html(
+            f"""
+            <script>{auto_relisten_js}</script>
+            <audio autoplay>
+              <source src="data:audio/mpeg;base64,{b64}" type="audio/mpeg">
+            </audio>
+            <script>
+            const audioEl = document.querySelector('audio');
+            audioEl.onended = () => {{ {relisten_call} }};
+            audioEl.play().catch(() => {{}});
+            </script>
+            """,
+            height=0,
+        )
+        return
+
+    # Fallback: browser speechSynthesis
     components.html(
         f"""
         <script>
@@ -187,7 +241,8 @@ def speak(text: str, hands_free: bool = False):
                 if (female) utter.voice = female;
                 utter.pitch = 1.05;
                 utter.rate = 1.0;
-                {auto_relisten}
+                {auto_relisten_js}
+                utter.onend = () => {{ {relisten_call} }};
                 window.speechSynthesis.cancel();
                 window.speechSynthesis.speak(utter);
             }};
@@ -390,6 +445,14 @@ with st.sidebar:
         value=st.secrets.get("GEMINI_API_KEY", "") if hasattr(st, "secrets") else "",
         help="Get one free at aistudio.google.com/apikey - no credit card needed. "
              "Set GEMINI_API_KEY in your HF Space secrets to skip typing this.",
+    )
+    elevenlabs_key = st.text_input(
+        "ElevenLabs API key (free, optional)",
+        type="password",
+        value=st.secrets.get("ELEVENLABS_API_KEY", "") if hasattr(st, "secrets") else "",
+        help="Free tier at elevenlabs.io - 10k characters/month, no card needed. "
+             "Gives her a natural voice instead of the robotic browser one. "
+             "Leave blank to use the free browser voice instead.",
     )
     st.session_state.brand = st.selectbox(
         "Your car",
@@ -687,5 +750,5 @@ with col_chat:
                 "reply": reply,
             })
 
-            speak(reply, hands_free=st.session_state.hands_free)
+            speak(reply, hands_free=st.session_state.hands_free, elevenlabs_key=elevenlabs_key)
             st.rerun()
