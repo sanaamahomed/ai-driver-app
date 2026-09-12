@@ -294,7 +294,13 @@ def speak(text: str, elevenlabs_key: str = "", elevenlabs_voice_id: str = ""):
 # `delay_ms` gives her spoken reply time to finish before the mic reopens
 # in hands-free mode, so it doesn't pick up her own voice.
 # -----------------------------------------------------------------------
-def capture_voice(delay_ms: int = 0) -> str:
+def capture_voice(delay_ms: int = 0):
+    """Returns None while the JS promise is still pending (st_javascript's
+    way of saying "not resolved yet on this rerun") - the CALLER must keep
+    re-invoking this on every subsequent rerun (same delay_ms, so the
+    underlying JS code stays identical) until it gets back a real string,
+    or the resolved transcript is lost. Returns "" if recognition ran but
+    caught nothing, or the transcript string if it heard something."""
     result = st_javascript(
         f"""
         await new Promise((resolve) => {{
@@ -316,7 +322,7 @@ def capture_voice(delay_ms: int = 0) -> str:
         }});
         """
     )
-    return result if isinstance(result, str) else ""
+    return result  # None = still pending; str = resolved (possibly "")
 
 
 # -----------------------------------------------------------------------
@@ -407,8 +413,10 @@ if "last_error" not in st.session_state:
     st.session_state.last_error = None
 if "last_tts_error" not in st.session_state:
     st.session_state.last_tts_error = None
+if "listening" not in st.session_state:
+    st.session_state.listening = False  # True while capture_voice()'s JS promise is in flight
 if "pending_capture" not in st.session_state:
-    st.session_state.pending_capture = False
+    st.session_state.pending_capture = False  # True only for the hands-free auto-relisten path (adds the reply-length delay)
 if "mic_unlocked" not in st.session_state:
     st.session_state.mic_unlocked = False  # becomes True after the first real tap-to-talk click
 if "last_reply_words" not in st.session_state:
@@ -652,12 +660,34 @@ def fa_icon(name: str, color: str, size: int = 18) -> str:
 def icon_span(html: str) -> str:
     return f'<span style="display:inline-flex; align-items:center;">{html}</span>'
 
+def logo_badge(size: int = 52) -> str:
+    """AI-chip mark - a rounded square chip labeled 'AI' with short circuit
+    pins radiating from each side, in the app's actual accent colors
+    (originally requested to match a chip/circuit-style reference image,
+    recolored here instead of copying that image directly)."""
+    pins = ""
+    for x in (34, 50, 66):
+        pins += f'<line x1="{x}" y1="6" x2="{x}" y2="22" stroke="{_accent}" stroke-width="3" stroke-linecap="round"/>'
+        pins += f'<line x1="{x}" y1="78" x2="{x}" y2="94" stroke="{_accent}" stroke-width="3" stroke-linecap="round"/>'
+    for y in (34, 50, 66):
+        pins += f'<line x1="6" y1="{y}" x2="22" y2="{y}" stroke="{_accent}" stroke-width="3" stroke-linecap="round"/>'
+        pins += f'<line x1="78" y1="{y}" x2="94" y2="{y}" stroke="{_accent}" stroke-width="3" stroke-linecap="round"/>'
+    return f"""<div style="width:{size}px; height:{size}px; flex-shrink:0;">
+        <svg width="{size}" height="{size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+            {pins}
+            <rect x="22" y="22" width="56" height="56" rx="12"
+                  fill="{_accent2}" stroke="{_accent}" stroke-width="3"/>
+            <text x="50" y="59" font-size="26" font-weight="700" text-anchor="middle"
+                  fill="{_accent}" font-family="Poppins, sans-serif">AI</text>
+        </svg>
+    </div>"""
+
 # -----------------------------------------------------------------------
 # MAIN LAYOUT
 # -----------------------------------------------------------------------
 st.markdown(
     f"""
-    <div class="adx-hero"><h1>AI DRIVER <span class="accent">APP</span></h1></div>
+    <div class="adx-hero">{logo_badge(52)}<h1>AI DRIVER <span class="accent">APP</span></h1></div>
     <div class="adx-subtitle"><span class="adx-status-dot"></span>Online &middot; {st.session_state.brand} companion mode</div>
     """,
     unsafe_allow_html=True,
@@ -694,16 +724,37 @@ with col_chat:
                 unsafe_allow_html=True,
             )
 
-    if st.session_state.pending_capture and st.session_state.mic_unlocked:
+    # Hands-free re-listening is driven entirely in Python now (session_state
+    # + st.rerun(), a soft in-app rerun - not the broken page-navigation
+    # trick). The very first mic use on a fresh session still needs one real
+    # button click, since a browser will only grant microphone permission in
+    # response to an actual user gesture; every listen after that (manual or
+    # hands-free) can be triggered programmatically once that's unlocked.
+    #
+    # capture_voice() returns None while its JS promise is still pending -
+    # the block calling it must stay reachable, with the SAME delay_ms, on
+    # every rerun until a real string comes back (that's how st_javascript's
+    # bridge resolves). A click just arms "listening" and does one
+    # st.rerun(); it must NOT call capture_voice() directly inside the
+    # click handler, or the resolved value has nowhere consistent to land.
+    voice_text = ""
+    if st.session_state.listening:
         st.caption("🎙️ Listening...")
-        delay_ms = min(max(st.session_state.last_reply_words * 350, 900), 6000)
-        voice_text = capture_voice(delay_ms=delay_ms)
-        st.session_state.pending_capture = False
+        delay_ms = min(max(st.session_state.last_reply_words * 350, 900), 6000) \
+            if st.session_state.pending_capture else 0
+        result = capture_voice(delay_ms=delay_ms)
+        if result is not None:
+            st.session_state.listening = False
+            st.session_state.pending_capture = False
+            voice_text = result
+            if not voice_text:
+                st.rerun()  # heard nothing - stop listening cleanly, no ghost turn
     else:
-        voice_text = ""
         if st.button("🎤 Tap to talk", use_container_width=True):
             st.session_state.mic_unlocked = True
-            voice_text = capture_voice(delay_ms=0)
+            st.session_state.listening = True
+            st.session_state.pending_capture = False
+            st.rerun()
 
     typed_text = st.chat_input("Or type here...")
 
@@ -746,6 +797,7 @@ with col_chat:
             st.session_state.last_reply_words = len(reply.split())
 
             if st.session_state.hands_free and st.session_state.mic_unlocked:
+                st.session_state.listening = True
                 st.session_state.pending_capture = True
 
             st.rerun()
