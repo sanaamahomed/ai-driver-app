@@ -335,7 +335,7 @@ if "history" not in st.session_state:
 if "last_dest" not in st.session_state:
     st.session_state.last_dest = None
 if "hands_free" not in st.session_state:
-    st.session_state.hands_free = False
+    st.session_state.hands_free = True  # on by default - she keeps listening without repeated taps
 if "last_error" not in st.session_state:
     st.session_state.last_error = None
 
@@ -373,32 +373,160 @@ with st.sidebar:
         st.caption(f"⚠️ Last API error: {st.session_state.last_error}")
 
 # -----------------------------------------------------------------------
+# THEME - dark, glassmorphic, gradient-accented. Pure CSS injected via
+# st.markdown; no external stylesheet needed so it stays $0/dependency-free.
+# -----------------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
+
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+
+    .stApp {
+        background:
+            radial-gradient(circle at 15% 0%, rgba(214,51,108,0.25), transparent 45%),
+            radial-gradient(circle at 85% 15%, rgba(90,60,220,0.25), transparent 45%),
+            linear-gradient(180deg, #0b0b14 0%, #14121f 100%);
+        color: #f2f0f8;
+    }
+
+    section[data-testid="stSidebar"] {
+        background: rgba(255,255,255,0.03);
+        border-right: 1px solid rgba(255,255,255,0.08);
+    }
+    section[data-testid="stSidebar"] * { color: #f2f0f8 !important; }
+
+    h1, h2, h3 { font-family: 'Poppins', sans-serif !important; }
+
+    .adx-hero {
+        display: flex; align-items: center; gap: 14px;
+        margin-bottom: 4px;
+    }
+    .adx-hero .emoji {
+        font-size: 42px;
+        filter: drop-shadow(0 0 18px rgba(214,51,108,0.55));
+    }
+    .adx-hero h1 {
+        margin: 0; font-size: 2.1rem; font-weight: 700;
+        background: linear-gradient(90deg, #ff5f8f, #b18cff 60%, #6ea8ff);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .adx-subtitle { color: #a9a4c4; margin: 2px 0 28px 0; font-size: 0.98rem; }
+
+    .adx-card {
+        background: rgba(255,255,255,0.045);
+        border: 1px solid rgba(255,255,255,0.09);
+        border-radius: 18px;
+        padding: 22px 22px 18px 22px;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+        min-height: 120px;
+    }
+    .adx-card h3 {
+        margin: 0 0 14px 0; font-size: 1.05rem; letter-spacing: 0.02em;
+        color: #ffffff; display: flex; align-items: center; gap: 8px;
+    }
+    .adx-empty {
+        color: #9891b8; font-size: 0.92rem; line-height: 1.5;
+        border: 1px dashed rgba(255,255,255,0.15);
+        border-radius: 12px; padding: 14px 16px;
+    }
+
+    .adx-bubble {
+        border-radius: 14px; padding: 11px 15px; margin-bottom: 10px;
+        font-size: 0.94rem; line-height: 1.45; max-width: 92%;
+    }
+    .adx-bubble.user {
+        background: rgba(110,168,255,0.14); border: 1px solid rgba(110,168,255,0.25);
+        margin-left: auto; text-align: right; color: #d7e6ff;
+    }
+    .adx-bubble.assistant {
+        background: linear-gradient(135deg, rgba(214,51,108,0.18), rgba(177,140,255,0.14));
+        border: 1px solid rgba(214,51,108,0.3);
+        margin-right: auto; color: #ffe1ec;
+    }
+    .adx-bubble .tag {
+        display: block; font-size: 0.68rem; text-transform: uppercase;
+        letter-spacing: 0.08em; opacity: 0.6; margin-bottom: 3px;
+    }
+
+    /* Streamlit chat input */
+    [data-testid="stChatInput"] textarea {
+        background: rgba(255,255,255,0.05) !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+        border-radius: 14px !important; color: #f2f0f8 !important;
+    }
+
+    .stButton > button, .stLinkButton > a {
+        border-radius: 12px !important;
+        border: 1px solid rgba(255,255,255,0.15) !important;
+        background: rgba(255,255,255,0.05) !important;
+        color: #f2f0f8 !important;
+    }
+    .stButton > button:hover, .stLinkButton > a:hover {
+        border-color: rgba(214,51,108,0.6) !important;
+        color: #ff8fb2 !important;
+    }
+
+    iframe { border-radius: 14px !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# -----------------------------------------------------------------------
 # MAIN LAYOUT
 # -----------------------------------------------------------------------
-st.title("🚗 AI Driver App")
-st.caption("Your voice-driven companion for the road.")
+st.markdown(
+    """
+    <div class="adx-hero"><span class="emoji">🚗</span><h1>AI Driver App</h1></div>
+    <div class="adx-subtitle">Your voice-driven companion for the road.</div>
+    """,
+    unsafe_allow_html=True,
+)
 
 col_map, col_chat = st.columns([1, 1])
 
 with col_map:
-    st.subheader("Navigation")
+    st.markdown('<div class="adx-card"><h3>🗺️ Navigation</h3>', unsafe_allow_html=True)
     if st.session_state.last_dest:
-        st.components.v1.iframe(maps_embed_url(st.session_state.last_dest), height=420)
+        st.components.v1.iframe(maps_embed_url(st.session_state.last_dest), height=380)
         st.link_button("Open in Maps app", maps_url(st.session_state.last_dest))
     else:
-        st.info("Say something like \"take me to the nearest cafe\" to pull up directions here.")
+        st.markdown(
+            '<div class="adx-empty">Say something like "take me to the nearest cafe" '
+            'and directions will appear here.</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
 
 with col_chat:
-    st.subheader("Chat")
+    st.markdown('<div class="adx-card"><h3>💬 Chat</h3>', unsafe_allow_html=True)
+    if not st.session_state.history:
+        st.markdown(
+            '<div class="adx-empty">Say hello, ask her anything, or ask for directions / music.</div>',
+            unsafe_allow_html=True,
+        )
     for turn in st.session_state.history:
-        role = "🧑" if turn["role"] == "user" else "💬"
-        st.markdown(f"**{role}** {turn['content']}")
+        css_class = "user" if turn["role"] == "user" else "assistant"
+        tag = "You" if turn["role"] == "user" else "Her"
+        st.markdown(
+            f'<div class="adx-bubble {css_class}"><span class="tag">{tag}</span>{turn["content"]}</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.write("")
 
     qp = st.query_params
     voice_text = qp.get("voice")
     auto_relisten = qp.get("relisten") == "1"
+    # Hands-free: also auto-start on the very first load (no history yet),
+    # not just after each reply, so there's nothing to tap after the
+    # initial mic-permission prompt.
+    first_load_auto = st.session_state.hands_free and not st.session_state.history and not voice_text
 
-    mic_button(auto_start=auto_relisten)
+    mic_button(auto_start=auto_relisten or first_load_auto)
 
     typed_text = st.chat_input("Or type here...")
 
