@@ -274,20 +274,17 @@ def mic_button(auto_start: bool = False, accent: str = "#00C2FF"):
     components.html(
         f"""
         <style>
-        @keyframes mic-pulse {{
-            0%   {{ box-shadow: 0 0 0 0 {accent}80, 0 4px 14px rgba(0,0,0,0.4); }}
-            70%  {{ box-shadow: 0 0 0 16px {accent}00, 0 4px 14px rgba(0,0,0,0.4); }}
-            100% {{ box-shadow: 0 0 0 0 {accent}00, 0 4px 14px rgba(0,0,0,0.4); }}
-        }}
-        #mic-btn {{ animation: mic-pulse 2.4s ease-out infinite; }}
-        #mic-btn:hover {{ filter: brightness(1.1); }}
+        #mic-btn {{ transition: filter 0.15s ease, transform 0.1s ease; }}
+        #mic-btn:hover {{ filter: brightness(1.12); }}
+        #mic-btn:active {{ transform: scale(0.98); }}
         </style>
         <div style="display:flex; justify-content:center; padding:8px 0; font-family:'Inter',sans-serif;">
           <button id="mic-btn" style="
               display:flex; align-items:center; gap:10px;
-              font-size:14px; font-weight:600; letter-spacing:0.03em; text-transform:uppercase;
-              padding:13px 26px; border-radius:8px;
-              border:none; background:{accent}; color:white; cursor:pointer;">
+              font-size:13px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase;
+              padding:13px 28px; border-radius:6px;
+              border:none; background:{accent}; color:white; cursor:pointer;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.35);">
             {mic_svg}<span id="mic-label">Tap to talk</span>
           </button>
         </div>
@@ -420,7 +417,7 @@ if "last_error" not in st.session_state:
 # of a generic one-size palette.
 # -----------------------------------------------------------------------
 BRAND_ACCENTS = {
-    "Generic / Any car": {"accent": "#00C2FF", "accent2": "#7C8CFF"},
+    "Generic / Any car": {"accent": "#5E77FF", "accent2": "#00D4C0"},
     "BMW":       {"accent": "#0066B1", "accent2": "#4FA8E0"},
     "Mercedes-Benz": {"accent": "#8BC4C0", "accent2": "#00A19A"},
     "Audi":      {"accent": "#BB0A30", "accent2": "#E63950"},
@@ -499,100 +496,94 @@ st.markdown(
     html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
 
     .stApp {{
-        background:
-            radial-gradient(ellipse 900px 420px at 20% -5%, {_accent}22, transparent 60%),
-            #0a0b0d;
-        color: #eef0f3;
-    }}
-
-    @keyframes adx-pulse {{
-        0%   {{ box-shadow: 0 0 0 0 {_accent}66, 0 4px 14px rgba(0,0,0,0.4); }}
-        70%  {{ box-shadow: 0 0 0 14px {_accent}00, 0 4px 14px rgba(0,0,0,0.4); }}
-        100% {{ box-shadow: 0 0 0 0 {_accent}00, 0 4px 14px rgba(0,0,0,0.4); }}
-    }}
-    @keyframes adx-blink {{
-        0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.35; }}
+        background: #1D1929;
+        color: #ECEAFB;
     }}
 
     section[data-testid="stSidebar"] {{
-        background: #101215;
-        border-right: 1px solid #202329;
+        background: #252131;
+        border-right: 1px solid #3E4958;
     }}
-    section[data-testid="stSidebar"] * {{ color: #eef0f3 !important; }}
+    section[data-testid="stSidebar"] * {{ color: #ECEAFB !important; }}
     section[data-testid="stSidebar"] h3 {{
-        font-family: 'Poppins', sans-serif !important; font-weight: 700 !important;
-        font-size: 0.78rem !important; letter-spacing: 0.14em !important;
-        color: {_accent} !important; margin-top: 4px;
+        font-family: 'Poppins', sans-serif !important; font-weight: 600 !important;
+        font-size: 0.72rem !important; letter-spacing: 0.16em !important;
+        color: #8B899E !important; margin-top: 6px;
     }}
 
     h1, h2, h3 {{ font-family: 'Poppins', sans-serif !important; }}
 
     .adx-hero {{
         display: flex; align-items: center; gap: 14px;
-        margin-bottom: 2px; padding-bottom: 18px;
-        border-bottom: 1px solid #1c1f25;
+        margin-bottom: 2px; padding-bottom: 22px;
+        border-bottom: 1px solid #3E4958;
     }}
     .adx-hero h1 {{
-        margin: 0; font-size: 1.9rem; font-weight: 800; letter-spacing: -0.01em;
-        color: #ffffff;
+        margin: 0; font-size: 1.7rem; font-weight: 700; letter-spacing: 0.01em;
+        color: #F3F6FF;
     }}
     .adx-hero h1 .accent {{ color: {_accent}; }}
     .adx-subtitle {{
-        color: #8a8f99; margin: 10px 0 26px 0; font-size: 0.92rem;
-        text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;
+        color: #8B899E; margin: 12px 0 28px 0; font-size: 0.78rem;
+        text-transform: uppercase; letter-spacing: 0.14em; font-weight: 600;
         display: flex; align-items: center; gap: 8px;
     }}
     .adx-status-dot {{
-        width: 8px; height: 8px; border-radius: 50%;
-        background: {_accent}; box-shadow: 0 0 8px {_accent};
-        animation: adx-blink 1.8s ease-in-out infinite;
+        width: 6px; height: 6px; border-radius: 50%;
+        background: {_accent};
     }}
 
-    .adx-card {{
-        background: #121417;
-        border: 1px solid #22262d;
-        border-top: 3px solid {_accent};
-        border-radius: 10px;
-        padding: 20px 20px 18px 20px;
+    /* Real Streamlit bordered containers (st.container(border=True)) used
+       for the Navigation/Chat panels - styled directly instead of a
+       hand-rolled div, so header + content always nest correctly.
+       Streamlit tags EVERY vertical-block wrapper (bordered or not) with
+       the same data-testid, but only actually-bordered ones get a real
+       generated emotion class instead of the empty "st-emotion-cache-0"
+       placeholder - :not([class*="cache-0"]) is what isolates them. */
+    div[data-testid="stVerticalBlockBorderWrapper"]:not([class*="cache-0"]) {{
+        background: #252131;
+        border: 1px solid #3E4958 !important;
+        border-top: 3px solid {_accent} !important;
+        border-radius: 10px !important;
         box-shadow: 0 4px 18px rgba(0,0,0,0.35);
-        min-height: 120px;
     }}
-    .adx-card h3 {{
+    div[data-testid="stVerticalBlockBorderWrapper"]:not([class*="cache-0"]) > div {{
+        padding: 20px 20px 18px 20px;
+    }}
+    div[data-testid="stVerticalBlockBorderWrapper"] h3 {{
         margin: 0 0 16px 0; font-size: 0.8rem; font-weight: 700;
         letter-spacing: 0.12em; text-transform: uppercase;
-        color: #ffffff; display: flex; align-items: center; gap: 9px;
+        color: #F3F6FF; display: flex; align-items: center; gap: 9px;
     }}
     .adx-empty {{
-        color: #767c88; font-size: 0.92rem; line-height: 1.5;
-        border: 1px solid #22262d;
-        background: #0e1013;
-        border-radius: 8px; padding: 14px 16px;
+        color: #8B899E; font-size: 0.88rem; line-height: 1.55;
+        border: 1px dashed #3E4958;
+        border-radius: 8px; padding: 16px 18px;
     }}
 
     .adx-bubble {{
-        border-radius: 8px; padding: 11px 15px; margin-bottom: 10px;
-        font-size: 0.94rem; line-height: 1.45; max-width: 92%;
-        background: #191c21; border: 1px solid #262a31; color: #e4e6ea;
+        border-radius: 6px; padding: 12px 16px; margin-bottom: 8px;
+        font-size: 0.93rem; line-height: 1.5; max-width: 88%;
+        background: transparent; border: 1px solid #3E4958; color: #C6D7FF;
     }}
     .adx-bubble.user {{
         margin-left: auto; text-align: right;
-        border-right: 3px solid #3a3f48;
+        background: #2B2640;
     }}
     .adx-bubble.assistant {{
         margin-right: auto;
-        border-left: 3px solid {_accent};
+        border-left: 2px solid {_accent};
     }}
     .adx-bubble .tag {{
-        display: block; font-size: 0.66rem; text-transform: uppercase;
-        letter-spacing: 0.1em; font-weight: 700; opacity: 0.65; margin-bottom: 4px;
-        color: {_accent};
+        display: block; font-size: 0.62rem; text-transform: uppercase;
+        letter-spacing: 0.12em; font-weight: 600; color: #8B899E; margin-bottom: 5px;
     }}
 
     /* Streamlit chat input */
     [data-testid="stChatInput"] textarea {{
-        background: #121417 !important;
-        border: 1px solid #262a31 !important;
-        border-radius: 10px !important; color: #eef0f3 !important;
+        background: #252131 !important;
+        border: 1px solid #3E4958 !important;
+        border-radius: 10px !important; color: #ECEAFB !important;
     }}
     [data-testid="stChatInput"]:focus-within {{
         border-color: {_accent} !important;
@@ -600,9 +591,9 @@ st.markdown(
 
     .stButton > button, .stLinkButton > a {{
         border-radius: 8px !important;
-        border: 1px solid #262a31 !important;
-        background: #16181c !important;
-        color: #eef0f3 !important;
+        border: 1px solid #3E4958 !important;
+        background: #2B2640 !important;
+        color: #ECEAFB !important;
         font-weight: 600 !important;
     }}
     .stButton > button:hover, .stLinkButton > a:hover {{
@@ -611,7 +602,7 @@ st.markdown(
     }}
 
     .stSelectbox [data-baseweb="select"] > div {{
-        background: #121417 !important; border-color: #262a31 !important;
+        background: #252131 !important; border-color: #3E4958 !important;
     }}
     .stToggle [data-baseweb="checkbox"] div[aria-checked="true"] {{
         background: {_accent} !important;
@@ -671,34 +662,33 @@ st.markdown(
 col_map, col_chat = st.columns([1, 1])
 
 with col_map:
-    st.markdown(f'<div class="adx-card"><h3>{icon_span(ICON_MAP, 19)} Navigation</h3>', unsafe_allow_html=True)
-    if st.session_state.last_dest:
-        st.components.v1.iframe(maps_embed_url(st.session_state.last_dest), height=380)
-        st.link_button("Open in Maps app", maps_url(st.session_state.last_dest))
-    else:
-        st.markdown(
-            '<div class="adx-empty">Say something like "take me to the nearest cafe" '
-            'and directions will appear here.</div>',
-            unsafe_allow_html=True,
-        )
-    st.markdown('</div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown(f'<h3>{icon_span(ICON_MAP, 19)} Navigation</h3>', unsafe_allow_html=True)
+        if st.session_state.last_dest:
+            st.components.v1.iframe(maps_embed_url(st.session_state.last_dest), height=380)
+            st.link_button("Open in Maps app", maps_url(st.session_state.last_dest))
+        else:
+            st.markdown(
+                '<div class="adx-empty">Say something like "take me to the nearest cafe" '
+                'and directions will appear here.</div>',
+                unsafe_allow_html=True,
+            )
 
 with col_chat:
-    st.markdown(f'<div class="adx-card"><h3>{icon_span(ICON_CHAT, 19)} Chat</h3>', unsafe_allow_html=True)
-    if not st.session_state.history:
-        st.markdown(
-            '<div class="adx-empty">Say hello, ask her anything, or ask for directions / music.</div>',
-            unsafe_allow_html=True,
-        )
-    for turn in st.session_state.history:
-        css_class = "user" if turn["role"] == "user" else "assistant"
-        tag = "You" if turn["role"] == "user" else "Her"
-        st.markdown(
-            f'<div class="adx-bubble {css_class}"><span class="tag">{tag}</span>{turn["content"]}</div>',
-            unsafe_allow_html=True,
-        )
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.write("")
+    with st.container(border=True):
+        st.markdown(f'<h3>{icon_span(ICON_CHAT, 19)} Chat</h3>', unsafe_allow_html=True)
+        if not st.session_state.history:
+            st.markdown(
+                '<div class="adx-empty">Say hello, ask her anything, or ask for directions / music.</div>',
+                unsafe_allow_html=True,
+            )
+        for turn in st.session_state.history:
+            css_class = "user" if turn["role"] == "user" else "assistant"
+            tag = "You" if turn["role"] == "user" else "Her"
+            st.markdown(
+                f'<div class="adx-bubble {css_class}"><span class="tag">{tag}</span>{turn["content"]}</div>',
+                unsafe_allow_html=True,
+            )
 
     qp = st.query_params
     voice_text = qp.get("voice")
