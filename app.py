@@ -129,6 +129,9 @@ NAV_PATTERNS = [
     r"take me to (.+)", r"navigate to (.+)", r"directions to (.+)",
     r"find (?:the |a )?(?:nearest|closest) (.+)",
     r"where(?:'s| is) the (?:nearest|closest) (.+)",
+    r"(?:i want to |i need to |i have to |let'?s |can we |could we |please )*go to (.+)",
+    r"head(?:ing)? to (.+)", r"drive to (.+)", r"get (?:us |me )?to (.+)",
+    r"how do (?:i|we) get to (.+)",
 ]
 MUSIC_PATTERNS = [
     r"play (.+)", r"put on (.+)", r"listen to (.+)",
@@ -209,19 +212,37 @@ def synthesize_elevenlabs(text: str, api_key: str, voice_id: str) -> bytes | Non
     return None
 
 
-def speak(text: str, elevenlabs_key: str = "", elevenlabs_voice_id: str = ""):
-    """Plays her reply. Hands-free re-listening is no longer driven from
-    inside this JS (that relied on the broken navigation trick) - Python
-    handles it after calling this, via st.session_state + st.rerun()."""
-    safe_text = json.dumps(text)
-
+def prepare_speech(text: str, elevenlabs_key: str = "", elevenlabs_voice_id: str = "") -> dict:
+    """Does the ElevenLabs API call (if any) and returns a small payload
+    describing what to play. Actually RENDERING it is a separate step
+    (render_speech, below) that must run on every script execution, not
+    just this one - see that function's docstring for why."""
     audio_bytes = (
         synthesize_elevenlabs(text, elevenlabs_key, elevenlabs_voice_id or ELEVENLABS_DEFAULT_VOICE_ID)
         if elevenlabs_key else None
     )
-
     if audio_bytes:
-        b64 = base64.b64encode(audio_bytes).decode()
+        return {"mode": "audio", "b64": base64.b64encode(audio_bytes).decode()}
+    return {"mode": "browser_tts", "text": text}
+
+
+def render_speech(payload: dict | None):
+    """Renders whatever prepare_speech() produced. We call st.rerun() right
+    after a reply to refresh the chat (and, in hands-free mode, to restart
+    listening) - but a full Streamlit rerun replaces the page's rendered
+    elements, which was silently killing the <audio> element before it
+    could finish (or even start) playing: that was the actual cause of
+    "no voice" even when everything else was configured correctly.
+    Fix: instead of rendering the player once inside the code path that's
+    about to call st.rerun(), we stash the payload in session_state and
+    call this function from a STABLE spot that runs on every single
+    rerun. As long as the payload is unchanged, Streamlit re-sends the
+    exact same iframe content each time, which browsers do NOT reload or
+    interrupt - so playback survives the rerun instead of being cut off."""
+    if not payload:
+        return
+
+    if payload["mode"] == "audio":
         components.html(
             f"""
             <div id="play-fallback" style="display:none; justify-content:center; padding:6px 0;
@@ -234,7 +255,7 @@ def speak(text: str, elevenlabs_key: str = "", elevenlabs_voice_id: str = ""):
               </button>
             </div>
             <audio id="adx-audio">
-              <source src="data:audio/mpeg;base64,{b64}" type="audio/mpeg">
+              <source src="data:audio/mpeg;base64,{payload['b64']}" type="audio/mpeg">
             </audio>
             <script>
             const audioEl = document.getElementById('adx-audio');
@@ -256,6 +277,7 @@ def speak(text: str, elevenlabs_key: str = "", elevenlabs_voice_id: str = ""):
         return
 
     # Fallback: browser speechSynthesis
+    safe_text = json.dumps(payload["text"])
     components.html(
         f"""
         <script>
@@ -421,6 +443,8 @@ if "mic_unlocked" not in st.session_state:
     st.session_state.mic_unlocked = False  # becomes True after the first real tap-to-talk click
 if "last_reply_words" not in st.session_state:
     st.session_state.last_reply_words = 0
+if "pending_speech" not in st.session_state:
+    st.session_state.pending_speech = None  # see render_speech() - kept alive across the post-reply rerun
 
 # -----------------------------------------------------------------------
 # BRAND THEMING - a browser page has no API that can read what car it's
@@ -531,11 +555,23 @@ st.markdown(
 
     html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
 
+    /* Exact palette from the reference (Just - App for drivers, Behance):
+       Primary (light blues) = backgrounds/surfaces, {_accent} = the one
+       medium blue used for buttons/highlights, Neutrals (dark) = text,
+       Accent trio (purple/orange/cyan) = reserved for small status signals
+       only, never as page chrome - that's how the reference actually uses
+       them once you look past its blue presentation-slide background. */
+    /* Exactly the reference: the whole page in the solid vivid blue field,
+       white cards floating on top - not a pale wash, not white-with-a-blue-
+       accent. This is the literal look of that Behance color slide. */
     .stApp {{
         background: linear-gradient(160deg, {_accent} 0%, {_accent2} 100%);
         color: #FFFFFF;
     }}
 
+    /* Black highlight, not just orange-into-black: a solid near-black
+       sidebar against the accent-colored main field, same split as a real
+       livery (black body, accent-color stripe) instead of one wash. */
     section[data-testid="stSidebar"] {{
         background: #141414;
         border-right: 2px solid {_accent};
@@ -574,6 +610,12 @@ st.markdown(
         box-shadow: 0 0 0 3px rgba(255,147,18,0.4);
     }}
 
+    /* Real Streamlit bordered containers (st.container(border=True, key=...))
+       used for the Navigation/Chat panels - styled directly instead of a
+       hand-rolled div, so header + content always nest correctly. Targeted
+       via the stable `.st-key-<key>` class Streamlit generates for a keyed
+       container (not the fragile "cache-0" class-name trick, which only
+       worked on some Streamlit versions and broke on Streamlit Cloud's). */
     .st-key-nav_card > div, .st-key-chat_card > div {{
         background: #FFFFFF;
         border: none !important;
@@ -616,6 +658,7 @@ st.markdown(
     }}
     .adx-bubble.user .tag {{ color: #E4E9FF; }}
 
+    /* Streamlit chat input */
     [data-testid="stChatInput"] textarea {{
         background: #F8FAFF !important;
         border: 1px solid #E4E9FF !important;
@@ -692,6 +735,11 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# Runs on EVERY script execution (not just the one that generated the
+# reply) - see render_speech()'s docstring for why that's what keeps the
+# audio alive across the rerun that happens right after a reply.
+render_speech(st.session_state.pending_speech)
 
 col_map, col_chat = st.columns([1, 1])
 
@@ -793,7 +841,9 @@ with col_chat:
                 "reply": reply,
             })
 
-            speak(reply, elevenlabs_key=elevenlabs_key, elevenlabs_voice_id=elevenlabs_voice_id)
+            st.session_state.pending_speech = prepare_speech(
+                reply, elevenlabs_key=elevenlabs_key, elevenlabs_voice_id=elevenlabs_voice_id
+            )
             st.session_state.last_reply_words = len(reply.split())
 
             if st.session_state.hands_free and st.session_state.mic_unlocked:
