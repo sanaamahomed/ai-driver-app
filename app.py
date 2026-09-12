@@ -216,16 +216,44 @@ def speak(text: str, hands_free: bool = False, elevenlabs_key: str = ""):
         components.html(
             f"""
             <script>{auto_relisten_js}</script>
-            <audio autoplay>
+            <div id="play-fallback" style="display:none; justify-content:center; padding:6px 0;
+                 font-family:'Inter',sans-serif;">
+              <button id="play-btn" style="
+                  display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;
+                  padding:10px 20px; border-radius:8px; border:1px solid #C6D7FF;
+                  background:#FFFFFF; color:#1D1929; cursor:pointer;">
+                🔊 Tap to hear her reply
+              </button>
+            </div>
+            <audio id="adx-audio">
               <source src="data:audio/mpeg;base64,{b64}" type="audio/mpeg">
             </audio>
             <script>
-            const audioEl = document.querySelector('audio');
-            audioEl.onended = () => {{ {relisten_call} }};
-            audioEl.play().catch(() => {{}});
+            const audioEl = document.getElementById('adx-audio');
+            const fallback = document.getElementById('play-fallback');
+            const playBtn = document.getElementById('play-btn');
+            let relistenFired = false;
+            const doRelisten = () => {{
+                if (relistenFired) return;
+                relistenFired = true;
+                {relisten_call}
+            }};
+            audioEl.onended = doRelisten;
+            // Browsers block autoplay after a full-page navigation (which is how
+            // voice input works here) even though it's fine right after a real
+            // tap - so if autoplay is blocked, show a one-tap fallback instead of
+            // failing silently, and keep hands-free alive with a safety timeout.
+            audioEl.play().catch(() => {{
+                fallback.style.display = 'flex';
+                playBtn.addEventListener('click', () => {{
+                    audioEl.play();
+                    fallback.style.display = 'none';
+                }});
+                setTimeout(doRelisten, 9000);
+            }});
             </script>
             """,
-            height=0,
+            height=90,
         )
         return
 
@@ -495,20 +523,26 @@ st.markdown(
 
     html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
 
+    /* Exact palette from the reference (Just - App for drivers, Behance):
+       Primary (light blues) = backgrounds/surfaces, {_accent} = the one
+       medium blue used for buttons/highlights, Neutrals (dark) = text,
+       Accent trio (purple/orange/cyan) = reserved for small status signals
+       only, never as page chrome - that's how the reference actually uses
+       them once you look past its blue presentation-slide background. */
     .stApp {{
-        background: #1D1929;
-        color: #ECEAFB;
+        background: #F3F6FF;
+        color: #1D1929;
     }}
 
     section[data-testid="stSidebar"] {{
-        background: #252131;
-        border-right: 1px solid #3E4958;
+        background: #FFFFFF;
+        border-right: 1px solid #C6D7FF;
     }}
-    section[data-testid="stSidebar"] * {{ color: #ECEAFB !important; }}
+    section[data-testid="stSidebar"] * {{ color: #1D1929 !important; }}
     section[data-testid="stSidebar"] h3 {{
         font-family: 'Poppins', sans-serif !important; font-weight: 600 !important;
         font-size: 0.72rem !important; letter-spacing: 0.16em !important;
-        color: #8B899E !important; margin-top: 6px;
+        color: #3E4958 !important; margin-top: 6px;
     }}
 
     h1, h2, h3 {{ font-family: 'Poppins', sans-serif !important; }}
@@ -516,21 +550,21 @@ st.markdown(
     .adx-hero {{
         display: flex; align-items: center; gap: 14px;
         margin-bottom: 2px; padding-bottom: 22px;
-        border-bottom: 1px solid #3E4958;
+        border-bottom: 1px solid #C6D7FF;
     }}
     .adx-hero h1 {{
         margin: 0; font-size: 1.7rem; font-weight: 700; letter-spacing: 0.01em;
-        color: #F3F6FF;
+        color: #1D1929;
     }}
     .adx-hero h1 .accent {{ color: {_accent}; }}
     .adx-subtitle {{
-        color: #8B899E; margin: 12px 0 28px 0; font-size: 0.78rem;
+        color: #3E4958; margin: 12px 0 28px 0; font-size: 0.78rem;
         text-transform: uppercase; letter-spacing: 0.14em; font-weight: 600;
         display: flex; align-items: center; gap: 8px;
     }}
     .adx-status-dot {{
         width: 6px; height: 6px; border-radius: 50%;
-        background: {_accent};
+        background: #FF9312;
     }}
 
     /* Real Streamlit bordered containers (st.container(border=True)) used
@@ -541,49 +575,51 @@ st.markdown(
        generated emotion class instead of the empty "st-emotion-cache-0"
        placeholder - :not([class*="cache-0"]) is what isolates them. */
     div[data-testid="stVerticalBlockBorderWrapper"]:not([class*="cache-0"]) {{
-        background: #252131;
-        border: 1px solid #3E4958 !important;
+        background: #FFFFFF;
+        border: 1px solid #C6D7FF !important;
         border-top: 3px solid {_accent} !important;
         border-radius: 10px !important;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.35);
+        box-shadow: 0 4px 18px rgba(94,119,255,0.1);
     }}
     div[data-testid="stVerticalBlockBorderWrapper"]:not([class*="cache-0"]) > div {{
         padding: 20px 20px 18px 20px;
     }}
     div[data-testid="stVerticalBlockBorderWrapper"] h3 {{
-        margin: 0 0 16px 0; font-size: 0.8rem; font-weight: 700;
-        letter-spacing: 0.12em; text-transform: uppercase;
-        color: #F3F6FF; display: flex; align-items: center; gap: 9px;
+        margin: 0 0 16px 0 !important; font-size: 0.8rem !important; font-weight: 700 !important;
+        letter-spacing: 0.12em !important; text-transform: uppercase !important;
+        color: #1D1929 !important; display: flex !important; align-items: center; gap: 9px;
     }}
     .adx-empty {{
-        color: #8B899E; font-size: 0.88rem; line-height: 1.55;
-        border: 1px dashed #3E4958;
+        color: #3E4958; font-size: 0.88rem; line-height: 1.55;
+        border: 1px dashed #C6D7FF;
+        background: #F3F6FF;
         border-radius: 8px; padding: 16px 18px;
     }}
 
     .adx-bubble {{
         border-radius: 6px; padding: 12px 16px; margin-bottom: 8px;
         font-size: 0.93rem; line-height: 1.5; max-width: 88%;
-        background: transparent; border: 1px solid #3E4958; color: #C6D7FF;
+        background: #FFFFFF; border: 1px solid #C6D7FF; color: #1D1929;
     }}
     .adx-bubble.user {{
         margin-left: auto; text-align: right;
-        background: #2B2640;
+        background: #C6D7FF;
+        border-color: #C6D7FF;
     }}
     .adx-bubble.assistant {{
         margin-right: auto;
-        border-left: 2px solid {_accent};
+        border-left: 3px solid {_accent};
     }}
     .adx-bubble .tag {{
         display: block; font-size: 0.62rem; text-transform: uppercase;
-        letter-spacing: 0.12em; font-weight: 600; color: #8B899E; margin-bottom: 5px;
+        letter-spacing: 0.12em; font-weight: 600; color: #3E4958; margin-bottom: 5px;
     }}
 
     /* Streamlit chat input */
     [data-testid="stChatInput"] textarea {{
-        background: #252131 !important;
-        border: 1px solid #3E4958 !important;
-        border-radius: 10px !important; color: #ECEAFB !important;
+        background: #FFFFFF !important;
+        border: 1px solid #C6D7FF !important;
+        border-radius: 10px !important; color: #1D1929 !important;
     }}
     [data-testid="stChatInput"]:focus-within {{
         border-color: {_accent} !important;
@@ -591,9 +627,9 @@ st.markdown(
 
     .stButton > button, .stLinkButton > a {{
         border-radius: 8px !important;
-        border: 1px solid #3E4958 !important;
-        background: #2B2640 !important;
-        color: #ECEAFB !important;
+        border: 1px solid #C6D7FF !important;
+        background: #FFFFFF !important;
+        color: #1D1929 !important;
         font-weight: 600 !important;
     }}
     .stButton > button:hover, .stLinkButton > a:hover {{
@@ -602,7 +638,7 @@ st.markdown(
     }}
 
     .stSelectbox [data-baseweb="select"] > div {{
-        background: #252131 !important; border-color: #3E4958 !important;
+        background: #FFFFFF !important; border-color: #C6D7FF !important;
     }}
     .stToggle [data-baseweb="checkbox"] div[aria-checked="true"] {{
         background: {_accent} !important;
@@ -619,13 +655,12 @@ st.markdown(
 # for a cleaner, more premium look against the dark glass UI.
 # -----------------------------------------------------------------------
 def _icon_car(color: str) -> str:
-    return f"""<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M7 29L10.5 18.5C11.2 16.4 13.1 15 15.3 15H32.7C34.9 15 36.8 16.4 37.5 18.5L41 29"
-stroke="{color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="5" y="29" width="38" height="9" rx="3.5" stroke="{color}" stroke-width="2.4"/>
-<circle cx="14" cy="38" r="3.2" stroke="{color}" stroke-width="2.4" fill="#0a0b0d"/>
-<circle cx="34" cy="38" r="3.2" stroke="{color}" stroke-width="2.4" fill="#0a0b0d"/>
-<path d="M14 21.5H34" stroke="{color}" stroke-width="2.2" stroke-linecap="round"/>
+    return f"""<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M5 11.5l1.4-4.2A2 2 0 0 1 8.3 6h7.4a2 2 0 0 1 1.9 1.3l1.4 4.2M5 11.5h14M5 11.5a2 2 0 0 0-2 2V16a1 1 0 0 0 1 1h1m15-6.5a2 2 0 0 1 2 2V16a1 1 0 0 1-1 1h-1"
+stroke="{color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="7.5" cy="17" r="1.7" fill="{color}"/>
+<circle cx="16.5" cy="17" r="1.7" fill="{color}"/>
+<path d="M9.2 17h5.6" stroke="{color}" stroke-width="1.6" stroke-linecap="round"/>
 </svg>"""
 
 def _icon_map(color: str) -> str:
