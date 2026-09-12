@@ -514,27 +514,36 @@ def ask_companion(client: genai.Client, history: list, user_text: str, pulse_con
         contents.append({"role": role, "parts": [{"text": turn["content"]}]})
     contents.append({"role": "user", "parts": [{"text": context_prefix + user_text}]})
 
+    # Live Google Search grounding - still free tier, no extra key - so she
+    # can answer "what's in the news"/"what's the weather" with real current
+    # info instead of guessing from stale training data. Not every API key
+    # or account tier is guaranteed to have grounding enabled, so this is
+    # attempted first but never allowed to be a hard dependency: any failure
+    # here (including one caused specifically by the tools= parameter)
+    # falls back to a plain, tool-less call rather than going silent.
+    attempts = [
+        genai_types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=200,
+            tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
+        ),
+        genai_types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=200,
+        ),
+    ]
     last_error = None
-    for attempt in range(2):
+    for config in attempts:
         try:
             response = client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=contents,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    max_output_tokens=200,
-                    # Live Google Search grounding - still free tier, no extra
-                    # key - so she can actually answer "what's in the news" or
-                    # "what's the weather like" with real current information
-                    # instead of guessing from stale training data.
-                    tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
-                ),
+                config=config,
             )
             return (response.text or "").strip()
         except Exception as e:  # noqa: BLE001 - never let a bad AI call kill the drive
             last_error = e
-            if attempt == 0:
-                time.sleep(1)
+            time.sleep(1)
     st.session_state.last_error = str(last_error)
     return "Sorry, I lost signal there for a second - mind saying that again?"
 
