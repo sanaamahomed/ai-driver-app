@@ -80,6 +80,13 @@ Hard rules for every reply, no exceptions:
 - Keep every reply to 2-3 sentences, maximum. Concise, warm, conversational - like a real
   person talking in the car, not an essay.
 - Stay in character as a warm, friendly companion at all times - never romantic or flirtatious.
+- You do NOT have real-time GPS, speed, distance, or ETA data unless it is explicitly given to
+  you in a "[Live trip context: ...]" note attached to the driver's message. NEVER invent
+  specific numbers or claims about the driver's current location, distance remaining, speed, or
+  how close they are to a destination. If asked something like "where am I" or "how far is it"
+  and you were not given real trip context, say plainly that you don't have their live location
+  and suggest they check their maps app - never guess or make up an answer that sounds precise.
+- Always use kilometers and km/h, never miles or mph, unless the driver's own message uses miles.
 """
 
 # -----------------------------------------------------------------------
@@ -168,21 +175,6 @@ def maps_embed_url(destination: str) -> str:
 def spotify_url(query: str) -> str:
     from urllib.parse import quote
     return f"https://open.spotify.com/search/{quote(query)}"
-
-
-def open_url_in_native_app(url: str):
-    """
-    Fires window.open on the *top* window. On a phone this triggers Android's
-    'open in app' chooser -> the native Maps/Spotify app opens. If the phone
-    is plugged into Android Auto, that native app is what then takes over
-    the Android Auto screen (the PWA itself cannot render on Android Auto).
-    """
-    components.html(
-        f"""<script>
-            try {{ window.top.open("{url}", "_blank"); }} catch (e) {{}}
-        </script>""",
-        height=0,
-    )
 
 
 # -----------------------------------------------------------------------
@@ -548,6 +540,8 @@ if "user_location_text" not in st.session_state:
     st.session_state.user_location_text = ""  # e.g. "Umhlanga, Durban, South Africa"
 if "location_lookup_done" not in st.session_state:
     st.session_state.location_lookup_done = False
+if "last_music_query" not in st.session_state:
+    st.session_state.last_music_query = None
 
 # Runs on every rerun (same reason as render_speech) until the one-shot GPS
 # lookup resolves, then never again this session.
@@ -630,6 +624,7 @@ with st.sidebar:
     if st.button("Clear conversation"):
         st.session_state.history = []
         st.session_state.last_dest = None
+        st.session_state.last_music_query = None
         st.rerun()
 
     st.caption(
@@ -929,6 +924,18 @@ with col_chat:
             st.session_state.pending_capture = False
             st.rerun()
 
+    if st.session_state.last_music_query:
+        # A real <a> link the browser renders directly in the page (not
+        # inside a components.html() iframe) - Streamlit Cloud's iframe
+        # sandbox has no "allow-popups" flag, which silently blocked the
+        # old window.open()-based auto-handoff with zero error. A real
+        # link_button sidesteps that entirely because it isn't sandboxed.
+        st.link_button(
+            "🎵 Open in Spotify",
+            spotify_url(st.session_state.last_music_query),
+            use_container_width=True,
+        )
+
     typed_text = st.chat_input("Or type here...")
 
     incoming = voice_text or typed_text
@@ -944,11 +951,10 @@ with col_chat:
         else:
             if intent == "nav":
                 st.session_state.last_dest = payload
-                reply = f"On it - pulling up directions to {payload} for you now."
-                open_url_in_native_app(maps_url(payload))
+                reply = f"Found it - tap the Open in Maps button below and I'll hand you straight to directions for {payload}."
             elif intent == "music":
-                reply = f"Sure thing - queuing up {payload} for you."
-                open_url_in_native_app(spotify_url(payload))
+                st.session_state.last_music_query = payload
+                reply = f"Sure thing - tap the Open in Spotify button below to start {payload}."
             elif not check_and_increment_daily_quota(DAILY_REPLY_QUOTA):
                 reply = "We've chatted so much today we hit the free daily limit - let's pick this up tomorrow."
             else:
