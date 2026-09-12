@@ -296,14 +296,9 @@ def speak(text: str, hands_free: bool = False, elevenlabs_key: str = ""):
 # SpeechRecognition support (e.g. desktop Firefox, iOS Safari).
 # -----------------------------------------------------------------------
 def mic_button(auto_start: bool = False, accent: str = "#00C2FF"):
-    mic_svg = (
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">'
-        '<rect x="9" y="2" width="6" height="12" rx="3" fill="white"/>'
-        '<path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="white" stroke-width="2" '
-        'stroke-linecap="round" fill="none"/></svg>'
-    )
     components.html(
         f"""
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
         <style>
         #mic-btn {{ transition: filter 0.15s ease, transform 0.1s ease; }}
         #mic-btn:hover {{ filter: brightness(1.12); }}
@@ -316,7 +311,8 @@ def mic_button(auto_start: bool = False, accent: str = "#00C2FF"):
               padding:13px 28px; border-radius:6px;
               border:none; background:{accent}; color:white; cursor:pointer;
               box-shadow: 0 2px 10px rgba(0,0,0,0.35);">
-            {mic_svg}<span id="mic-label">Tap to talk</span>
+            <i class="fa-solid fa-microphone" style="color:white; font-size:16px;"></i>
+            <span id="mic-label">Tap to talk</span>
           </button>
         </div>
         <script>
@@ -448,6 +444,7 @@ if "last_error" not in st.session_state:
 # of a generic one-size palette.
 # -----------------------------------------------------------------------
 BRAND_ACCENTS = {
+    "McLaren":   {"accent": "#FF8000", "accent2": "#1A1A1A"},  # papaya orange - McLaren's real signature color
     "Generic / Any car": {"accent": "#5E77FF", "accent2": "#00D4C0"},
     "BMW":       {"accent": "#0066B1", "accent2": "#4FA8E0"},
     "Mercedes-Benz": {"accent": "#8BC4C0", "accent2": "#00A19A"},
@@ -460,7 +457,7 @@ BRAND_ACCENTS = {
 }
 
 if "brand" not in st.session_state:
-    st.session_state.brand = "Generic / Any car"
+    st.session_state.brand = "McLaren"
 
 # -----------------------------------------------------------------------
 # SIDEBAR - API key + live map + controls
@@ -511,13 +508,18 @@ with st.sidebar:
         st.caption(f"⚠️ Last API error: {st.session_state.last_error}")
 
 # -----------------------------------------------------------------------
-# THEME - solid vivid blue field with white floating cards, matching the
-# reference exactly. Accent color comes from the brand picked in the
-# sidebar. Pure CSS injected via st.markdown; no external stylesheet
-# needed so it stays $0/dependency-free.
+# THEME - solid vivid McLaren-papaya field with white floating cards.
+# Accent color comes from the brand picked in the sidebar. Pure CSS
+# injected via st.markdown; no external stylesheet needed so it stays
+# $0/dependency-free (Font Awesome icon font is the one CDN exception).
 # -----------------------------------------------------------------------
 _accent = BRAND_ACCENTS[st.session_state.brand]["accent"]
 _accent2 = BRAND_ACCENTS[st.session_state.brand]["accent2"]
+
+st.markdown(
+    '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">',
+    unsafe_allow_html=True,
+)
 
 st.markdown(
     f"""
@@ -526,11 +528,8 @@ st.markdown(
 
     html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
 
-    /* Exactly the reference: the whole page in the solid vivid blue field,
-       white cards floating on top - not a pale wash, not white-with-a-blue-
-       accent. This is the literal look of that Behance color slide. */
     .stApp {{
-        background: linear-gradient(160deg, {_accent} 0%, #4A63E8 100%);
+        background: linear-gradient(160deg, {_accent} 0%, {_accent2} 100%);
         color: #FFFFFF;
     }}
 
@@ -572,25 +571,22 @@ st.markdown(
         box-shadow: 0 0 0 3px rgba(255,147,18,0.4);
     }}
 
-    /* Real Streamlit bordered containers (st.container(border=True)) used
-       for the Navigation/Chat panels - styled directly instead of a
-       hand-rolled div, so header + content always nest correctly.
-       Streamlit tags EVERY vertical-block wrapper (bordered or not) with
-       the same data-testid, but only actually-bordered ones get a real
-       generated emotion class instead of the empty "st-emotion-cache-0"
-       placeholder - :not([class*="cache-0"]) is what isolates them.
-       Strong shadow (not a border) is what gives these real depth instead
-       of the flat, washed-out look of a thin pale outline. */
-    div[data-testid="stVerticalBlockBorderWrapper"]:not([class*="cache-0"]) {{
+    /* Real Streamlit bordered containers (st.container(border=True, key=...))
+       used for the Navigation/Chat panels - styled directly instead of a
+       hand-rolled div, so header + content always nest correctly. Targeted
+       via the stable `.st-key-<key>` class Streamlit generates for a keyed
+       container (not the fragile "cache-0" class-name trick, which only
+       worked on some Streamlit versions and broke on Streamlit Cloud's). */
+    .st-key-nav_card > div, .st-key-chat_card > div {{
         background: #FFFFFF;
         border: none !important;
         border-radius: 16px !important;
         box-shadow: 0 8px 30px rgba(29,25,41,0.12), 0 2px 8px rgba(29,25,41,0.06);
     }}
-    div[data-testid="stVerticalBlockBorderWrapper"]:not([class*="cache-0"]) > div {{
+    .st-key-nav_card > div > div, .st-key-chat_card > div > div {{
         padding: 22px 22px 20px 22px;
     }}
-    div[data-testid="stVerticalBlockBorderWrapper"] h3 {{
+    .st-key-nav_card h3, .st-key-chat_card h3 {{
         margin: 0 0 16px 0 !important; font-size: 0.8rem !important; font-weight: 700 !important;
         letter-spacing: 0.12em !important; text-transform: uppercase !important;
         color: {_accent} !important; display: flex !important; align-items: center; gap: 9px;
@@ -659,44 +655,35 @@ st.markdown(
 )
 
 # -----------------------------------------------------------------------
-# ICONS - minimal line-art SVGs (stroke = currentColor) instead of emoji,
-# for a cleaner, more premium look against the dark glass UI.
+# ICONS - Font Awesome (loaded via CDN above), not hand-drawn SVGs. A real
+# icon set reads as professional; the earlier custom paths didn't.
 # -----------------------------------------------------------------------
-def _icon_car(color: str) -> str:
-    return f"""<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M5 11.5l1.4-4.2A2 2 0 0 1 8.3 6h7.4a2 2 0 0 1 1.9 1.3l1.4 4.2M5 11.5h14M5 11.5a2 2 0 0 0-2 2V16a1 1 0 0 0 1 1h1m15-6.5a2 2 0 0 1 2 2V16a1 1 0 0 1-1 1h-1"
-stroke="{color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-<circle cx="7.5" cy="17" r="1.7" fill="{color}"/>
-<circle cx="16.5" cy="17" r="1.7" fill="{color}"/>
-<path d="M9.2 17h5.6" stroke="{color}" stroke-width="1.6" stroke-linecap="round"/>
-</svg>"""
+def fa_icon(name: str, color: str, size: int = 18) -> str:
+    return f'<i class="fa-solid {name}" style="color:{color}; font-size:{size}px;"></i>'
 
-def _icon_map(color: str) -> str:
-    return f"""<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M12 21s-7-6.1-7-11.5C5 5.9 8.1 3 12 3s7 2.9 7 6.5C19 14.9 12 21 12 21z"
-stroke="{color}" stroke-width="1.8" stroke-linejoin="round"/>
-<circle cx="12" cy="9.5" r="2.4" stroke="{color}" stroke-width="1.8"/>
-</svg>"""
+def icon_span(html: str) -> str:
+    return f'<span style="display:inline-flex; align-items:center;">{html}</span>'
 
-def _icon_chat(color: str) -> str:
-    return f"""<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M4 5.5C4 4.7 4.7 4 5.5 4h13c.8 0 1.5.7 1.5 1.5v10c0 .8-.7 1.5-1.5 1.5H9l-4 3.5v-3.5H5.5C4.7 16.5 4 15.8 4 15V5.5z"
-stroke="{color}" stroke-width="1.8" stroke-linejoin="round"/>
-</svg>"""
-
-ICON_CAR = _icon_car("#FFFFFF")  # sits on the blue page background, needs to be white
-ICON_MAP = _icon_map(_accent)    # sits inside a white card, needs to be blue
-ICON_CHAT = _icon_chat(_accent)
-
-def icon_span(svg: str, size: int = 22) -> str:
-    return f'<span style="display:inline-flex; width:{size}px; height:{size}px; vertical-align:-5px;">{svg}</span>'
+def logo_badge(size: int = 52) -> str:
+    """Rounded-square gradient app-icon badge (McLaren papaya orange -> black),
+    holding a car glyph from Font Awesome - an original mark, not a reuse of
+    any third-party app icon."""
+    inner = int(size * 0.5)
+    return f"""<div style="
+        width:{size}px; height:{size}px; border-radius:{size * 0.26}px;
+        background: linear-gradient(135deg, {_accent} 0%, {_accent2} 130%);
+        display:flex; align-items:center; justify-content:center;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+        flex-shrink:0;">
+        {fa_icon('fa-car-side', '#FFFFFF', inner)}
+    </div>"""
 
 # -----------------------------------------------------------------------
 # MAIN LAYOUT
 # -----------------------------------------------------------------------
 st.markdown(
     f"""
-    <div class="adx-hero">{icon_span(ICON_CAR, 44)}<h1>AI <span class="accent">DRIVER</span></h1></div>
+    <div class="adx-hero">{logo_badge(52)}<h1>AI DRIVER <span class="accent">APP</span></h1></div>
     <div class="adx-subtitle"><span class="adx-status-dot"></span>Online &middot; {st.session_state.brand} companion mode</div>
     """,
     unsafe_allow_html=True,
@@ -705,8 +692,8 @@ st.markdown(
 col_map, col_chat = st.columns([1, 1])
 
 with col_map:
-    with st.container(border=True):
-        st.markdown(f'<h3>{icon_span(ICON_MAP, 19)} Navigation</h3>', unsafe_allow_html=True)
+    with st.container(border=True, key="nav_card"):
+        st.markdown(f'<h3>{icon_span(fa_icon("fa-location-dot", _accent, 16))} Navigation</h3>', unsafe_allow_html=True)
         if st.session_state.last_dest:
             st.components.v1.iframe(maps_embed_url(st.session_state.last_dest), height=380)
             st.link_button("Open in Maps app", maps_url(st.session_state.last_dest))
@@ -718,8 +705,8 @@ with col_map:
             )
 
 with col_chat:
-    with st.container(border=True):
-        st.markdown(f'<h3>{icon_span(ICON_CHAT, 19)} Chat</h3>', unsafe_allow_html=True)
+    with st.container(border=True, key="chat_card"):
+        st.markdown(f'<h3>{icon_span(fa_icon("fa-comment-dots", _accent, 16))} Chat</h3>', unsafe_allow_html=True)
         if not st.session_state.history:
             st.markdown(
                 '<div class="adx-empty">Say hello, ask her anything, or ask for directions / music.</div>',
