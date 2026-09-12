@@ -89,13 +89,17 @@ Hard rules for every reply, no exceptions:
 def get_pulse_context() -> str:
     """
     Pull live driver/trip context (speed, trip duration, location) and
-    return it as a short string folded into the Gemini prompt.
+    return it as a short string folded into the Gemini prompt. Real GPS
+    location (see request_browser_location()/reverse_geocode() below) is
+    already folded in here; this is the seam for adding real vehicle
+    telemetry (speed, trip duration) once a Pulse driver/session id exists.
 
         from pulse_client import get_live_trip_stats
         stats = get_live_trip_stats(driver_id=...)
         return f"Trip so far: {stats['duration_min']} min, {stats['distance_km']} km."
     """
-    return ""  # no-op until a Pulse driver/session id is available to query
+    location = st.session_state.get("user_location_text", "")
+    return f"The driver's current approximate location is {location}." if location else ""
 
 
 # -----------------------------------------------------------------------
@@ -305,39 +309,58 @@ def render_speech(payload: dict | None):
 
 
 # -----------------------------------------------------------------------
-# BROWSER SPEECH-TO-TEXT ($0 - Web Speech API)
-# Streamlit Cloud sandboxes components.html() iframes WITHOUT the
-# "allow-top-navigation" flag, which silently breaks the common trick of
-# setting window.top.location.href to smuggle a JS value back into Python
-# (it throws a SecurityError and the navigation is blocked - this was the
-# real cause of "no voice" for a long time). st_javascript() uses
-# Streamlit's actual supported component bridge (postMessage, not page
-# navigation) so it isn't affected by that sandbox restriction.
+# BROWSER SPEECH-TO-TEXT ($0)
+# The Web Speech API's SpeechRecognition (used previously) does not exist
+# at all in Safari/iOS - no error, no permission prompt, it just silently
+# resolves empty, which looked exactly like "the button does nothing".
+# MediaRecorder (used here instead) is supported in Safari 14.3+, Chrome,
+# and Edge alike: it just records raw audio, which we then hand to Gemini
+# (already free-tier, already configured) to transcribe - no new API key,
+# no new account. Streamlit Cloud sandboxes components.html() iframes
+# WITHOUT "allow-top-navigation", which silently breaks the older trick of
+# setting window.top.location.href to smuggle a value back into Python (it
+# throws a SecurityError) - st_javascript() uses Streamlit's actual
+# supported component bridge (postMessage, not page navigation) so it
+# isn't affected by that sandbox restriction.
 # `delay_ms` gives her spoken reply time to finish before the mic reopens
-# in hands-free mode, so it doesn't pick up her own voice.
+# in hands-free mode, so it doesn't record her own voice.
 # -----------------------------------------------------------------------
-def capture_voice(delay_ms: int = 0):
+def capture_voice(delay_ms: int = 0, record_ms: int = 4500):
     """Returns None while the JS promise is still pending (st_javascript's
     way of saying "not resolved yet on this rerun") - the CALLER must keep
-    re-invoking this on every subsequent rerun (same delay_ms, so the
-    underlying JS code stays identical) until it gets back a real string,
-    or the resolved transcript is lost. Returns "" if recognition ran but
-    caught nothing, or the transcript string if it heard something."""
+    re-invoking this on every subsequent rerun (same delay_ms/record_ms, so
+    the underlying JS code stays identical) until it gets back a real
+    string, or the resolved value is lost. Returns "" if recording wasn't
+    possible (unsupported browser, mic permission denied) or produced no
+    audio, or "<mime type>|<base64 audio>" if it recorded something -
+    transcribe_audio() below turns that into actual text."""
     result = st_javascript(
         f"""
         await new Promise((resolve) => {{
-            const go = () => {{
+            const go = async () => {{
                 try {{
-                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                    if (!SpeechRecognition) {{ resolve(""); return; }}
-                    const rec = new SpeechRecognition();
-                    rec.lang = 'en-US';
-                    rec.interimResults = false;
-                    rec.maxAlternatives = 1;
-                    rec.onresult = (e) => resolve(e.results[0][0].transcript);
-                    rec.onerror = () => resolve("");
-                    rec.onend = () => resolve("");
-                    rec.start();
+                    if (!navigator.mediaDevices || !window.MediaRecorder) {{ resolve(""); return; }}
+                    const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+                    const mimeType = MediaRecorder.isTypeSupported('audio/webm')
+                        ? 'audio/webm' : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
+                    const recorder = mimeType ? new MediaRecorder(stream, {{ mimeType }}) : new MediaRecorder(stream);
+                    const chunks = [];
+                    recorder.ondataavailable = (e) => {{ if (e.data.size > 0) chunks.push(e.data); }};
+                    recorder.onstop = () => {{
+                        stream.getTracks().forEach(t => t.stop());
+                        if (!chunks.length) {{ resolve(""); return; }}
+                        const blob = new Blob(chunks, {{ type: recorder.mimeType || mimeType || 'audio/webm' }});
+                        const reader = new FileReader();
+                        reader.onloadend = () => {{
+                            const b64 = reader.result.split(',')[1] || "";
+                            resolve(b64 ? (blob.type + "|" + b64) : "");
+                        }};
+                        reader.onerror = () => resolve("");
+                        reader.readAsDataURL(blob);
+                    }};
+                    recorder.onerror = () => {{ stream.getTracks().forEach(t => t.stop()); resolve(""); }};
+                    recorder.start();
+                    setTimeout(() => {{ if (recorder.state !== 'inactive') recorder.stop(); }}, {record_ms});
                 }} catch (e) {{ resolve(""); }}
             }};
             setTimeout(go, {delay_ms});
@@ -345,6 +368,82 @@ def capture_voice(delay_ms: int = 0):
         """
     )
     return result  # None = still pending; str = resolved (possibly "")
+
+
+# -----------------------------------------------------------------------
+# REAL GPS LOCATION ($0)
+# navigator.geolocation is the browser's actual GPS/network location (not
+# guessed from Gemini's training data), and Nominatim (OpenStreetMap) turns
+# raw coordinates into a place name for free - no API key, no billing
+# account, just a required User-Agent header per its usage policy. This is
+# a one-shot lookup per session (cached in session_state), not continuous
+# turn-by-turn tracking - good enough for "which city/suburb is the driver
+# in" context, not for live navigation.
+# -----------------------------------------------------------------------
+def request_browser_location():
+    """Returns None while the JS promise is still pending (same
+    st_javascript contract as capture_voice() - the caller must keep
+    re-invoking this on every rerun until it gets a real string back).
+    Returns "" if location is unavailable/denied, or "lat,lon" once resolved."""
+    return st_javascript(
+        """
+        await new Promise((resolve) => {
+            if (!navigator.geolocation) { resolve(""); return; }
+            navigator.geolocation.getCurrentPosition(
+                (pos) => resolve(pos.coords.latitude + "," + pos.coords.longitude),
+                () => resolve(""),
+                { timeout: 8000, maximumAge: 300000 }
+            );
+        });
+        """
+    )
+
+
+def reverse_geocode(lat: str, lon: str) -> str:
+    """Turns raw coordinates into a human place name (suburb/city/country)
+    via OpenStreetMap's free Nominatim service."""
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"format": "json", "lat": lat, "lon": lon, "zoom": 14},
+            headers={"User-Agent": "ai-driver-app/1.0"},
+            timeout=6,
+        )
+        if resp.status_code == 200:
+            addr = resp.json().get("address", {})
+            candidates = [addr.get(k) for k in
+                          ("suburb", "city", "town", "county", "state", "country") if addr.get(k)]
+            seen = set()
+            parts = [p for p in candidates if not (p in seen or seen.add(p))]
+            return ", ".join(parts[:3])
+    except requests.exceptions.RequestException:
+        pass
+    return ""
+
+
+def transcribe_audio(client: "genai.Client", mime_type: str, audio_b64: str) -> str:
+    """Sends the recorded clip straight to Gemini (already our one free-tier
+    provider) and asks for a bare transcript back - no separate speech API,
+    no extra account, no extra key."""
+    try:
+        # inline_data expects raw bytes, not the base64 text the browser sent us.
+        audio_bytes = base64.b64decode(audio_b64)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[{
+                "role": "user",
+                "parts": [
+                    {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
+                    {"text": "Transcribe only the words spoken in this audio clip. Output just the "
+                              "raw transcript with no quotes, labels, or commentary. If it's silent "
+                              "or you can't make out any speech, output nothing."},
+                ],
+            }],
+            config=genai_types.GenerateContentConfig(max_output_tokens=120),
+        )
+        return (response.text or "").strip()
+    except Exception:  # noqa: BLE001 - a failed transcription should just mean "heard nothing"
+        return ""
 
 
 # -----------------------------------------------------------------------
@@ -445,6 +544,20 @@ if "last_reply_words" not in st.session_state:
     st.session_state.last_reply_words = 0
 if "pending_speech" not in st.session_state:
     st.session_state.pending_speech = None  # see render_speech() - kept alive across the post-reply rerun
+if "user_location_text" not in st.session_state:
+    st.session_state.user_location_text = ""  # e.g. "Umhlanga, Durban, South Africa"
+if "location_lookup_done" not in st.session_state:
+    st.session_state.location_lookup_done = False
+
+# Runs on every rerun (same reason as render_speech) until the one-shot GPS
+# lookup resolves, then never again this session.
+if not st.session_state.location_lookup_done:
+    _loc_result = request_browser_location()
+    if _loc_result is not None:
+        st.session_state.location_lookup_done = True
+        if _loc_result:
+            _lat, _lon = _loc_result.split(",", 1)
+            st.session_state.user_location_text = reverse_geocode(_lat, _lon)
 
 # -----------------------------------------------------------------------
 # BRAND THEMING - a browser page has no API that can read what car it's
@@ -518,6 +631,11 @@ with st.sidebar:
         st.session_state.history = []
         st.session_state.last_dest = None
         st.rerun()
+
+    st.caption(
+        f"📍 {st.session_state.user_location_text}" if st.session_state.user_location_text
+        else ("📍 Locating..." if not st.session_state.location_lookup_done else "📍 Location not shared - allow it in your browser to let her know where you are")
+    )
 
     st.divider()
     st.markdown("### LIVE MAP")
@@ -787,16 +905,23 @@ with col_chat:
     # click handler, or the resolved value has nowhere consistent to land.
     voice_text = ""
     if st.session_state.listening:
-        st.caption("🎙️ Listening...")
-        delay_ms = min(max(st.session_state.last_reply_words * 350, 900), 6000) \
-            if st.session_state.pending_capture else 0
-        result = capture_voice(delay_ms=delay_ms)
-        if result is not None:
+        if not api_key:
             st.session_state.listening = False
             st.session_state.pending_capture = False
-            voice_text = result
-            if not voice_text:
-                st.rerun()  # heard nothing - stop listening cleanly, no ghost turn
+            st.error("Enter your free Gemini API key in the sidebar first - it's also what turns your voice into text.")
+        else:
+            st.caption("🎙️ Listening...")
+            delay_ms = min(max(st.session_state.last_reply_words * 350, 900), 6000) \
+                if st.session_state.pending_capture else 0
+            result = capture_voice(delay_ms=delay_ms)
+            if result is not None:
+                st.session_state.listening = False
+                st.session_state.pending_capture = False
+                if result and "|" in result:
+                    mime_type, audio_b64 = result.split("|", 1)
+                    voice_text = transcribe_audio(get_client(api_key), mime_type, audio_b64)
+                if not voice_text:
+                    st.rerun()  # heard nothing (or no mic access) - stop listening cleanly, no ghost turn
     else:
         if st.button("🎤 Tap to talk", use_container_width=True):
             st.session_state.mic_unlocked = True
