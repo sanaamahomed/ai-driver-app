@@ -60,19 +60,22 @@ ELEVENLABS_TTS_URL = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_V
 # your free-tier daily limit actually is, or set to None to disable.
 DAILY_REPLY_QUOTA = 300
 
-SYSTEM_PROMPT = """You are a lovely, warm, beautiful-souled lady companion riding along in the
-car with the driver. You keep them company on long drives: easy conversation, genuine warmth,
-a bit of playful charm, and real substance when they want to go deep - history, philosophy,
-science, whatever they bring up. The driver can ask you absolutely anything, on any topic -
-always give a real, direct, helpful answer in your own words. Never refuse a question or tell
-them to look something up elsewhere; you are their only source of answers in this car.
+SYSTEM_PROMPT = """You are a warm, friendly female companion riding along in the car with the
+driver, keeping them company on the drive - easy conversation, genuine warmth, a bit of light
+humor, and real substance when they want to go deep - history, philosophy, science, whatever
+they bring up. Your tone is that of a good friend, not a romantic partner: warm and personable,
+never flirtatious, and never using pet names like "darling," "sweetheart," or "love." Your
+driver could be anyone, of any gender - keep the tone friendly and comfortable for anyone. The
+driver can ask you absolutely anything, on any topic - always give a real, direct, helpful
+answer in your own words. Never refuse a question or tell them to look something up elsewhere;
+you are their only source of answers in this car.
 
 Hard rules for every reply, no exceptions:
 - This is SPOKEN aloud by text-to-speech. Never use markdown, bullet points, numbered lists,
   headers, asterisks, or any formatting symbols. Plain spoken sentences only.
 - Keep every reply to 2-3 sentences, maximum. Concise, warm, conversational - like a real
   person talking in the car, not an essay.
-- Stay in character as a warm, engaging companion at all times.
+- Stay in character as a warm, friendly companion at all times - never romantic or flirtatious.
 """
 
 # -----------------------------------------------------------------------
@@ -388,7 +391,7 @@ def ask_companion(client: genai.Client, history: list, user_text: str, pulse_con
             if attempt == 0:
                 time.sleep(1)
     st.session_state.last_error = str(last_error)
-    return "Sorry love, I lost signal there for a second - mind saying that again?"
+    return "Sorry, I lost signal there for a second - mind saying that again?"
 
 
 # -----------------------------------------------------------------------
@@ -508,10 +511,10 @@ with st.sidebar:
         st.caption(f"⚠️ Last API error: {st.session_state.last_error}")
 
 # -----------------------------------------------------------------------
-# THEME - flat, high-contrast, single-accent "OEM infotainment" look
-# (think Tesla/BMW digital cockpit, not a consumer gradient app). Accent
-# color comes from the brand picked in the sidebar. Pure CSS injected via
-# st.markdown; no external stylesheet needed so it stays $0/dependency-free.
+# THEME - solid vivid blue field with white floating cards, matching the
+# reference exactly. Accent color comes from the brand picked in the
+# sidebar. Pure CSS injected via st.markdown; no external stylesheet
+# needed so it stays $0/dependency-free.
 # -----------------------------------------------------------------------
 _accent = BRAND_ACCENTS[st.session_state.brand]["accent"]
 _accent2 = BRAND_ACCENTS[st.session_state.brand]["accent2"]
@@ -523,48 +526,50 @@ st.markdown(
 
     html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
 
-    /* Exact palette from the reference (Just - App for drivers, Behance):
-       Primary (light blues) = backgrounds/surfaces, {_accent} = the one
-       medium blue used for buttons/highlights, Neutrals (dark) = text,
-       Accent trio (purple/orange/cyan) = reserved for small status signals
-       only, never as page chrome - that's how the reference actually uses
-       them once you look past its blue presentation-slide background. */
+    /* Exactly the reference: the whole page in the solid vivid blue field,
+       white cards floating on top - not a pale wash, not white-with-a-blue-
+       accent. This is the literal look of that Behance color slide. */
     .stApp {{
-        background: #F3F6FF;
-        color: #1D1929;
+        background: linear-gradient(160deg, {_accent} 0%, #4A63E8 100%);
+        color: #FFFFFF;
     }}
 
     section[data-testid="stSidebar"] {{
-        background: #FFFFFF;
-        border-right: 1px solid #C6D7FF;
+        background: {_accent};
+        border-right: 1px solid rgba(255,255,255,0.15);
     }}
-    section[data-testid="stSidebar"] * {{ color: #1D1929 !important; }}
+    section[data-testid="stSidebar"] * {{ color: #FFFFFF !important; }}
     section[data-testid="stSidebar"] h3 {{
-        font-family: 'Poppins', sans-serif !important; font-weight: 600 !important;
+        font-family: 'Poppins', sans-serif !important; font-weight: 700 !important;
         font-size: 0.72rem !important; letter-spacing: 0.16em !important;
-        color: #3E4958 !important; margin-top: 6px;
+        color: #E4E9FF !important; margin-top: 6px;
     }}
+    section[data-testid="stSidebar"] input, section[data-testid="stSidebar"] [data-baseweb="select"] > div {{
+        background: #FFFFFF !important; color: #1D1929 !important;
+    }}
+    section[data-testid="stSidebar"] input::placeholder {{ color: #8E9AC7 !important; }}
 
     h1, h2, h3 {{ font-family: 'Poppins', sans-serif !important; }}
 
     .adx-hero {{
         display: flex; align-items: center; gap: 14px;
-        margin-bottom: 2px; padding-bottom: 22px;
-        border-bottom: 1px solid #C6D7FF;
+        margin-bottom: 2px; padding-bottom: 20px;
+        border-bottom: 1px solid rgba(255,255,255,0.25);
     }}
     .adx-hero h1 {{
-        margin: 0; font-size: 1.7rem; font-weight: 700; letter-spacing: 0.01em;
-        color: #1D1929;
+        margin: 0; font-size: 1.9rem; font-weight: 800; letter-spacing: 0.01em;
+        color: #FFFFFF;
     }}
-    .adx-hero h1 .accent {{ color: {_accent}; }}
+    .adx-hero h1 .accent {{ color: #FFFFFF; opacity: 0.85; font-weight: 800; }}
     .adx-subtitle {{
-        color: #3E4958; margin: 12px 0 28px 0; font-size: 0.78rem;
-        text-transform: uppercase; letter-spacing: 0.14em; font-weight: 600;
+        color: #F3F6FF; margin: 14px 0 28px 0; font-size: 0.78rem;
+        text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700;
         display: flex; align-items: center; gap: 8px;
     }}
     .adx-status-dot {{
-        width: 6px; height: 6px; border-radius: 50%;
+        width: 7px; height: 7px; border-radius: 50%;
         background: #FF9312;
+        box-shadow: 0 0 0 3px rgba(255,147,18,0.4);
     }}
 
     /* Real Streamlit bordered containers (st.container(border=True)) used
@@ -573,38 +578,40 @@ st.markdown(
        Streamlit tags EVERY vertical-block wrapper (bordered or not) with
        the same data-testid, but only actually-bordered ones get a real
        generated emotion class instead of the empty "st-emotion-cache-0"
-       placeholder - :not([class*="cache-0"]) is what isolates them. */
+       placeholder - :not([class*="cache-0"]) is what isolates them.
+       Strong shadow (not a border) is what gives these real depth instead
+       of the flat, washed-out look of a thin pale outline. */
     div[data-testid="stVerticalBlockBorderWrapper"]:not([class*="cache-0"]) {{
         background: #FFFFFF;
-        border: 1px solid #C6D7FF !important;
-        border-top: 3px solid {_accent} !important;
-        border-radius: 10px !important;
-        box-shadow: 0 4px 18px rgba(94,119,255,0.1);
+        border: none !important;
+        border-radius: 16px !important;
+        box-shadow: 0 8px 30px rgba(29,25,41,0.12), 0 2px 8px rgba(29,25,41,0.06);
     }}
     div[data-testid="stVerticalBlockBorderWrapper"]:not([class*="cache-0"]) > div {{
-        padding: 20px 20px 18px 20px;
+        padding: 22px 22px 20px 22px;
     }}
     div[data-testid="stVerticalBlockBorderWrapper"] h3 {{
         margin: 0 0 16px 0 !important; font-size: 0.8rem !important; font-weight: 700 !important;
         letter-spacing: 0.12em !important; text-transform: uppercase !important;
-        color: #1D1929 !important; display: flex !important; align-items: center; gap: 9px;
+        color: {_accent} !important; display: flex !important; align-items: center; gap: 9px;
     }}
     .adx-empty {{
         color: #3E4958; font-size: 0.88rem; line-height: 1.55;
         border: 1px dashed #C6D7FF;
-        background: #F3F6FF;
-        border-radius: 8px; padding: 16px 18px;
+        background: #F8FAFF;
+        border-radius: 10px; padding: 16px 18px;
     }}
 
     .adx-bubble {{
-        border-radius: 6px; padding: 12px 16px; margin-bottom: 8px;
+        border-radius: 10px; padding: 12px 16px; margin-bottom: 8px;
         font-size: 0.93rem; line-height: 1.5; max-width: 88%;
-        background: #FFFFFF; border: 1px solid #C6D7FF; color: #1D1929;
+        background: #F8FAFF; color: #1D1929;
+        box-shadow: 0 1px 4px rgba(29,25,41,0.06);
     }}
     .adx-bubble.user {{
         margin-left: auto; text-align: right;
-        background: #C6D7FF;
-        border-color: #C6D7FF;
+        background: {_accent};
+        color: #FFFFFF;
     }}
     .adx-bubble.assistant {{
         margin-right: auto;
@@ -612,25 +619,26 @@ st.markdown(
     }}
     .adx-bubble .tag {{
         display: block; font-size: 0.62rem; text-transform: uppercase;
-        letter-spacing: 0.12em; font-weight: 600; color: #3E4958; margin-bottom: 5px;
+        letter-spacing: 0.12em; font-weight: 700; color: #8E9AC7; margin-bottom: 5px;
     }}
+    .adx-bubble.user .tag {{ color: #E4E9FF; }}
 
     /* Streamlit chat input */
     [data-testid="stChatInput"] textarea {{
-        background: #FFFFFF !important;
-        border: 1px solid #C6D7FF !important;
-        border-radius: 10px !important; color: #1D1929 !important;
+        background: #F8FAFF !important;
+        border: 1px solid #E4E9FF !important;
+        border-radius: 12px !important; color: #1D1929 !important;
     }}
     [data-testid="stChatInput"]:focus-within {{
         border-color: {_accent} !important;
     }}
 
     .stButton > button, .stLinkButton > a {{
-        border-radius: 8px !important;
-        border: 1px solid #C6D7FF !important;
-        background: #FFFFFF !important;
+        border-radius: 10px !important;
+        border: 1px solid #E4E9FF !important;
+        background: #F8FAFF !important;
         color: #1D1929 !important;
-        font-weight: 600 !important;
+        font-weight: 700 !important;
     }}
     .stButton > button:hover, .stLinkButton > a:hover {{
         border-color: {_accent} !important;
@@ -638,13 +646,13 @@ st.markdown(
     }}
 
     .stSelectbox [data-baseweb="select"] > div {{
-        background: #FFFFFF !important; border-color: #C6D7FF !important;
+        background: #F8FAFF !important; border-color: #E4E9FF !important;
     }}
     .stToggle [data-baseweb="checkbox"] div[aria-checked="true"] {{
         background: {_accent} !important;
     }}
 
-    iframe {{ border-radius: 10px !important; }}
+    iframe {{ border-radius: 12px !important; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -676,8 +684,8 @@ def _icon_chat(color: str) -> str:
 stroke="{color}" stroke-width="1.8" stroke-linejoin="round"/>
 </svg>"""
 
-ICON_CAR = _icon_car(_accent)
-ICON_MAP = _icon_map(_accent)
+ICON_CAR = _icon_car("#FFFFFF")  # sits on the blue page background, needs to be white
+ICON_MAP = _icon_map(_accent)    # sits inside a white card, needs to be blue
 ICON_CHAT = _icon_chat(_accent)
 
 def icon_span(svg: str, size: int = 22) -> str:
