@@ -330,52 +330,64 @@ def capture_voice(delay_ms: int = 0, record_ms: int = 4500):
     into actual text."""
     result = st_javascript(
         f"""
-        await new Promise((resolve) => {{
-            const go = async () => {{
-                try {{
-                    if (!navigator.mediaDevices || !window.MediaRecorder) {{
-                        resolve("ERR|Unsupported|This browser can't record audio."); return;
-                    }}
-                    let stream;
+        await Promise.race([
+            new Promise((resolve) => {{
+                const go = async () => {{
                     try {{
-                        stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
-                    }} catch (permErr) {{
-                        // Resolved as a tagged "ERR|..." string instead of silently
-                        // swallowed - capture_voice()'s caller turns this into a real
-                        // st.error() shown right in the app, so ANY visitor sees the
-                        // actual cause (blocked permission, no mic, etc), not just a
-                        // dead button - this has to work for strangers, not just
-                        // someone who knows to open DevTools.
-                        resolve("ERR|" + permErr.name + "|" + (permErr.message || "Microphone access failed.")); return;
-                    }}
-                    const mimeType = MediaRecorder.isTypeSupported('audio/webm')
-                        ? 'audio/webm' : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
-                    const recorder = mimeType ? new MediaRecorder(stream, {{ mimeType }}) : new MediaRecorder(stream);
-                    const chunks = [];
-                    recorder.ondataavailable = (e) => {{ if (e.data.size > 0) chunks.push(e.data); }};
-                    recorder.onstop = () => {{
-                        stream.getTracks().forEach(t => t.stop());
-                        if (!chunks.length) {{ resolve(""); return; }}
-                        const blob = new Blob(chunks, {{ type: recorder.mimeType || mimeType || 'audio/webm' }});
-                        const reader = new FileReader();
-                        reader.onloadend = () => {{
-                            const b64 = reader.result.split(',')[1] || "";
-                            resolve(b64 ? ("OK|" + blob.type + "|" + b64) : "");
+                        if (!navigator.mediaDevices || !window.MediaRecorder) {{
+                            resolve("ERR|Unsupported|This browser can't record audio."); return;
+                        }}
+                        let stream;
+                        try {{
+                            stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+                        }} catch (permErr) {{
+                            // Resolved as a tagged "ERR|..." string instead of silently
+                            // swallowed - capture_voice()'s caller turns this into a real
+                            // st.error() shown right in the app, so ANY visitor sees the
+                            // actual cause (blocked permission, no mic, etc), not just a
+                            // dead button - this has to work for strangers, not just
+                            // someone who knows to open DevTools.
+                            resolve("ERR|" + permErr.name + "|" + (permErr.message || "Microphone access failed.")); return;
+                        }}
+                        const mimeType = MediaRecorder.isTypeSupported('audio/webm')
+                            ? 'audio/webm' : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
+                        const recorder = mimeType ? new MediaRecorder(stream, {{ mimeType }}) : new MediaRecorder(stream);
+                        const chunks = [];
+                        recorder.ondataavailable = (e) => {{ if (e.data.size > 0) chunks.push(e.data); }};
+                        recorder.onstop = () => {{
+                            stream.getTracks().forEach(t => t.stop());
+                            if (!chunks.length) {{ resolve(""); return; }}
+                            const blob = new Blob(chunks, {{ type: recorder.mimeType || mimeType || 'audio/webm' }});
+                            const reader = new FileReader();
+                            reader.onloadend = () => {{
+                                const b64 = reader.result.split(',')[1] || "";
+                                resolve(b64 ? ("OK|" + blob.type + "|" + b64) : "");
+                            }};
+                            reader.onerror = () => resolve("ERR|ReadError|Couldn't process the recording.");
+                            reader.readAsDataURL(blob);
                         }};
-                        reader.onerror = () => resolve("ERR|ReadError|Couldn't process the recording.");
-                        reader.readAsDataURL(blob);
-                    }};
-                    recorder.onerror = () => {{
-                        stream.getTracks().forEach(t => t.stop());
-                        resolve("ERR|RecordingError|Recording failed partway through.");
-                    }};
-                    recorder.start();
-                    setTimeout(() => {{ if (recorder.state !== 'inactive') recorder.stop(); }}, {record_ms});
-                }} catch (e) {{ resolve("ERR|" + (e.name || "Unknown") + "|" + (e.message || "Something went wrong.")); }}
-            }};
-            setTimeout(go, {delay_ms});
-        }});
-        """
+                        recorder.onerror = () => {{
+                            stream.getTracks().forEach(t => t.stop());
+                            resolve("ERR|RecordingError|Recording failed partway through.");
+                        }};
+                        recorder.start();
+                        setTimeout(() => {{ if (recorder.state !== 'inactive') recorder.stop(); }}, {record_ms});
+                    }} catch (e) {{ resolve("ERR|" + (e.name || "Unknown") + "|" + (e.message || "Something went wrong.")); }}
+                }};
+                setTimeout(go, {delay_ms});
+            }}),
+            // Hard backstop: if the permission prompt (or anything else)
+            // never calls back at all, this guarantees we still resolve
+            // instead of leaving "Listening..." stuck on screen forever.
+            new Promise((resolve) => setTimeout(
+                () => resolve("ERR|Timeout|The browser never responded to the microphone request. "
+                             + "This usually means permission was already silently blocked - check "
+                             + "your browser's site settings for this page."),
+                {delay_ms} + {record_ms} + 8000
+            )),
+        ]);
+        """,
+        key=f"capture_voice_{delay_ms}_{record_ms}",
     )
     return result  # None/0 = still pending; "" = heard nothing (not an error);
     # "OK|<mime>|<base64>" = got audio; "ERR|<name>|<message>" = a real failure
@@ -399,15 +411,23 @@ def request_browser_location():
     location is unavailable/denied, or "lat,lon" once resolved."""
     return st_javascript(
         """
-        await new Promise((resolve) => {
-            if (!navigator.geolocation) { resolve(""); return; }
-            navigator.geolocation.getCurrentPosition(
-                (pos) => resolve(pos.coords.latitude + "," + pos.coords.longitude),
-                (err) => { console.error("AI Driver App: geolocation failed -", err.code, err.message); resolve(""); },
-                { timeout: 8000, maximumAge: 300000 }
-            );
-        });
-        """
+        await Promise.race([
+            new Promise((resolve) => {
+                if (!navigator.geolocation) { resolve(""); return; }
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => resolve(pos.coords.latitude + "," + pos.coords.longitude),
+                    (err) => resolve(""),
+                    { timeout: 8000, maximumAge: 300000 }
+                );
+            }),
+            // Hard backstop: browser/OS-level permission prompts have been
+            // observed to just never call either geolocation callback at
+            // all in some environments - without this, that hangs the
+            // component (and the sidebar's "Locating...") forever.
+            new Promise((resolve) => setTimeout(() => resolve(""), 10000)),
+        ]);
+        """,
+        key="browser_location",
     )
 
 
@@ -585,7 +605,12 @@ if "last_music_query" not in st.session_state:
 
 # Runs on every rerun (same reason as render_speech) until the one-shot GPS
 # lookup resolves, then never again this session.
-if not st.session_state.location_lookup_done:
+if not st.session_state.location_lookup_done and not st.session_state.listening:
+    # Skipped while listening=True: both this and capture_voice() mount an
+    # instance of the same underlying streamlit_javascript component, and
+    # running two at once turned out to make BOTH get stuck pending
+    # forever instead of just one - one component instance active at a
+    # time is far more reliable.
     _loc_result = request_browser_location()
     # st_javascript() returns the int 0 (not None) as its placeholder value
     # while the JS promise is still pending - our real resolved value is
