@@ -48,11 +48,14 @@ MAX_HISTORY_TURNS = 12  # cap what we send to Gemini so each reply stays fast an
 VAULT_PATH = Path(__file__).parent / "conversation_vault.json"
 
 # ElevenLabs free tier: 10,000 characters/month, no card required - far more
-# natural than the browser's built-in voice. "Rachel" is one of ElevenLabs'
-# stock warm female voices; swap ELEVENLABS_VOICE_ID for any voice id from
-# your own Voice Library if you'd rather use a different one.
-ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
-ELEVENLABS_TTS_URL = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+# natural than the browser's built-in voice. IMPORTANT: free accounts get a
+# 402 "Free users cannot use library voices via the API" error for any
+# shared Voice Library voice ID (like the default "Rachel" ID below) - the
+# API only accepts a voice from your OWN "My Voices" collection. Add any
+# free voice from the Voice Library to your account first (Voice Library ->
+# a voice -> "Add to my voices"), then paste ITS id in the sidebar to
+# override this default.
+ELEVENLABS_DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 
 # Gemini's free tier caps requests/day per API key. This keeps the whole
 # app - across every visitor on a shared link - under that ceiling so it
@@ -182,10 +185,10 @@ def open_url_in_native_app(url: str):
 # speechSynthesis (still $0, just more robotic) if no ElevenLabs key is
 # set or the call fails for any reason - the drive never goes silent.
 # -----------------------------------------------------------------------
-def synthesize_elevenlabs(text: str, api_key: str) -> bytes | None:
+def synthesize_elevenlabs(text: str, api_key: str, voice_id: str) -> bytes | None:
     try:
         resp = requests.post(
-            ELEVENLABS_TTS_URL,
+            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
             headers={"xi-api-key": api_key, "Content-Type": "application/json"},
             json={
                 "text": text,
@@ -205,7 +208,7 @@ def synthesize_elevenlabs(text: str, api_key: str) -> bytes | None:
     return None
 
 
-def speak(text: str, hands_free: bool = False, elevenlabs_key: str = ""):
+def speak(text: str, hands_free: bool = False, elevenlabs_key: str = "", elevenlabs_voice_id: str = ""):
     safe_text = json.dumps(text)
     auto_relisten_js = """
             const relisten = () => {
@@ -216,7 +219,10 @@ def speak(text: str, hands_free: bool = False, elevenlabs_key: str = ""):
     """ if hands_free else "const relisten = () => {};"
     relisten_call = "relisten();" if hands_free else ""
 
-    audio_bytes = synthesize_elevenlabs(text, elevenlabs_key) if elevenlabs_key else None
+    audio_bytes = (
+        synthesize_elevenlabs(text, elevenlabs_key, elevenlabs_voice_id or ELEVENLABS_DEFAULT_VOICE_ID)
+        if elevenlabs_key else None
+    )
 
     if audio_bytes:
         b64 = base64.b64encode(audio_bytes).decode()
@@ -463,7 +469,10 @@ BRAND_ACCENTS = {
     "Nissan":    {"accent": "#C3002F", "accent2": "#1A1A1A"},
 }
 
-if "brand" not in st.session_state:
+if st.session_state.get("brand") not in BRAND_ACCENTS:
+    # Handles both first load and a returning browser session whose saved
+    # brand name no longer exists (e.g. after a rename like McLaren ->
+    # Racing Orange) - falls back instead of crashing on a stale value.
     st.session_state.brand = "Racing Orange"
 
 # -----------------------------------------------------------------------
@@ -485,6 +494,15 @@ with st.sidebar:
         help="Free tier at elevenlabs.io - 10k characters/month, no card needed. "
              "Gives her a natural voice instead of the robotic browser one. "
              "Leave blank to use the free browser voice instead.",
+    )
+    elevenlabs_voice_id = st.text_input(
+        "ElevenLabs Voice ID (required for free accounts)",
+        value=st.secrets.get("ELEVENLABS_VOICE_ID", "") if hasattr(st, "secrets") else "",
+        help="ElevenLabs free accounts get blocked from using shared Voice "
+             "Library voices via the API. Go to elevenlabs.io -> Voice Library, "
+             "pick any voice, click 'Add to my voices', then open My Voices and "
+             "copy that voice's ID here. Leave blank to try the stock default "
+             "(will fail with a 402 on most free accounts).",
     )
     st.session_state.brand = st.selectbox(
         "Your car",
@@ -783,5 +801,10 @@ with col_chat:
                 "reply": reply,
             })
 
-            speak(reply, hands_free=st.session_state.hands_free, elevenlabs_key=elevenlabs_key)
+            speak(
+                reply,
+                hands_free=st.session_state.hands_free,
+                elevenlabs_key=elevenlabs_key,
+                elevenlabs_voice_id=elevenlabs_voice_id,
+            )
             st.rerun()
