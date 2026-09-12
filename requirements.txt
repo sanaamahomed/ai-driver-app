@@ -1,2 +1,4 @@
 streamlit>=1.38
 google-genai>=0.3.0
+requests>=2.31
+streamlit-javascript>=0.1.5
