@@ -28,6 +28,7 @@ from pathlib import Path
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit_javascript import st_javascript
 from google import genai
 from google.genai import types as genai_types
 
@@ -208,16 +209,11 @@ def synthesize_elevenlabs(text: str, api_key: str, voice_id: str) -> bytes | Non
     return None
 
 
-def speak(text: str, hands_free: bool = False, elevenlabs_key: str = "", elevenlabs_voice_id: str = ""):
+def speak(text: str, elevenlabs_key: str = "", elevenlabs_voice_id: str = ""):
+    """Plays her reply. Hands-free re-listening is no longer driven from
+    inside this JS (that relied on the broken navigation trick) - Python
+    handles it after calling this, via st.session_state + st.rerun()."""
     safe_text = json.dumps(text)
-    auto_relisten_js = """
-            const relisten = () => {
-                const url = new URL(window.top.location.href);
-                url.searchParams.set('relisten', '1');
-                setTimeout(() => { window.top.location.href = url.toString(); }, 400);
-            };
-    """ if hands_free else "const relisten = () => {};"
-    relisten_call = "relisten();" if hands_free else ""
 
     audio_bytes = (
         synthesize_elevenlabs(text, elevenlabs_key, elevenlabs_voice_id or ELEVENLABS_DEFAULT_VOICE_ID)
@@ -228,7 +224,6 @@ def speak(text: str, hands_free: bool = False, elevenlabs_key: str = "", elevenl
         b64 = base64.b64encode(audio_bytes).decode()
         components.html(
             f"""
-            <script>{auto_relisten_js}</script>
             <div id="play-fallback" style="display:none; justify-content:center; padding:6px 0;
                  font-family:'Inter',sans-serif;">
               <button id="play-btn" style="
@@ -245,24 +240,14 @@ def speak(text: str, hands_free: bool = False, elevenlabs_key: str = "", elevenl
             const audioEl = document.getElementById('adx-audio');
             const fallback = document.getElementById('play-fallback');
             const playBtn = document.getElementById('play-btn');
-            let relistenFired = false;
-            const doRelisten = () => {{
-                if (relistenFired) return;
-                relistenFired = true;
-                {relisten_call}
-            }};
-            audioEl.onended = doRelisten;
-            // Browsers block autoplay after a full-page navigation (which is how
-            // voice input works here) even though it's fine right after a real
-            // tap - so if autoplay is blocked, show a one-tap fallback instead of
-            // failing silently, and keep hands-free alive with a safety timeout.
+            // Autoplay right after a real tap works fine; if it's ever
+            // blocked, show a one-tap fallback instead of failing silently.
             audioEl.play().catch(() => {{
                 fallback.style.display = 'flex';
                 playBtn.addEventListener('click', () => {{
                     audioEl.play();
                     fallback.style.display = 'none';
                 }});
-                setTimeout(doRelisten, 9000);
             }});
             </script>
             """,
@@ -282,8 +267,6 @@ def speak(text: str, hands_free: bool = False, elevenlabs_key: str = "", elevenl
                 if (female) utter.voice = female;
                 utter.pitch = 1.05;
                 utter.rate = 1.0;
-                {auto_relisten_js}
-                utter.onend = () => {{ {relisten_call} }};
                 window.speechSynthesis.cancel();
                 window.speechSynthesis.speak(utter);
             }};
@@ -300,63 +283,40 @@ def speak(text: str, hands_free: bool = False, elevenlabs_key: str = "", elevenl
 
 
 # -----------------------------------------------------------------------
-# BROWSER SPEECH-TO-TEXT ($0 - Web Speech API, mic button)
-# Writes the transcript into the URL query string, which Streamlit reads
-# back on rerun. Falls back to a plain text box if the browser has no
-# SpeechRecognition support (e.g. desktop Firefox, iOS Safari).
+# BROWSER SPEECH-TO-TEXT ($0 - Web Speech API)
+# Streamlit Cloud sandboxes components.html() iframes WITHOUT the
+# "allow-top-navigation" flag, which silently breaks the common trick of
+# setting window.top.location.href to smuggle a JS value back into Python
+# (it throws a SecurityError and the navigation is blocked - this was the
+# real cause of "no voice" for a long time). st_javascript() uses
+# Streamlit's actual supported component bridge (postMessage, not page
+# navigation) so it isn't affected by that sandbox restriction.
+# `delay_ms` gives her spoken reply time to finish before the mic reopens
+# in hands-free mode, so it doesn't pick up her own voice.
 # -----------------------------------------------------------------------
-def mic_button(auto_start: bool = False, accent: str = "#00C2FF"):
-    components.html(
+def capture_voice(delay_ms: int = 0) -> str:
+    result = st_javascript(
         f"""
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-        <style>
-        #mic-btn {{ transition: filter 0.15s ease, transform 0.1s ease; }}
-        #mic-btn:hover {{ filter: brightness(1.12); }}
-        #mic-btn:active {{ transform: scale(0.98); }}
-        </style>
-        <div style="display:flex; justify-content:center; padding:8px 0; font-family:'Inter',sans-serif;">
-          <button id="mic-btn" style="
-              display:flex; align-items:center; gap:10px;
-              font-size:13px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase;
-              padding:13px 28px; border-radius:6px;
-              border:none; background:{accent}; color:white; cursor:pointer;
-              box-shadow: 0 2px 10px rgba(0,0,0,0.35);">
-            <i class="fa-solid fa-microphone" style="color:white; font-size:16px;"></i>
-            <span id="mic-label">Tap to talk</span>
-          </button>
-        </div>
-        <script>
-        const btn = document.getElementById('mic-btn');
-        const label = document.getElementById('mic-label');
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {{
-            label.innerText = "Voice not supported - type below";
-            btn.disabled = true;
-        }} else {{
-            const rec = new SpeechRecognition();
-            rec.lang = 'en-US';
-            rec.interimResults = false;
-            rec.maxAlternatives = 1;
-            const startListening = () => {{
-                label.innerText = "Listening...";
-                try {{ rec.start(); }} catch (e) {{}}
+        await new Promise((resolve) => {{
+            const go = () => {{
+                try {{
+                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    if (!SpeechRecognition) {{ resolve(""); return; }}
+                    const rec = new SpeechRecognition();
+                    rec.lang = 'en-US';
+                    rec.interimResults = false;
+                    rec.maxAlternatives = 1;
+                    rec.onresult = (e) => resolve(e.results[0][0].transcript);
+                    rec.onerror = () => resolve("");
+                    rec.onend = () => resolve("");
+                    rec.start();
+                }} catch (e) {{ resolve(""); }}
             }};
-            btn.addEventListener('click', startListening);
-            rec.onresult = (event) => {{
-                const transcript = event.results[0][0].transcript;
-                const url = new URL(window.top.location.href);
-                url.searchParams.delete('relisten');
-                url.searchParams.set('voice', transcript);
-                window.top.location.href = url.toString();
-            }};
-            rec.onerror = () => {{ label.innerText = "Tap to talk"; }};
-            rec.onend = () => {{ label.innerText = "Tap to talk"; }};
-            if ({str(auto_start).lower()}) {{ startListening(); }}
-        }}
-        </script>
-        """,
-        height=90,
+            setTimeout(go, {delay_ms});
+        }});
+        """
     )
+    return result if isinstance(result, str) else ""
 
 
 # -----------------------------------------------------------------------
@@ -447,6 +407,12 @@ if "last_error" not in st.session_state:
     st.session_state.last_error = None
 if "last_tts_error" not in st.session_state:
     st.session_state.last_tts_error = None
+if "pending_capture" not in st.session_state:
+    st.session_state.pending_capture = False
+if "mic_unlocked" not in st.session_state:
+    st.session_state.mic_unlocked = False  # becomes True after the first real tap-to-talk click
+if "last_reply_words" not in st.session_state:
+    st.session_state.last_reply_words = 0
 
 # -----------------------------------------------------------------------
 # BRAND THEMING - a browser page has no API that can read what car it's
@@ -562,9 +528,6 @@ st.markdown(
         color: #FFFFFF;
     }}
 
-    /* Black highlight, not just orange-into-black: a solid near-black
-       sidebar against the accent-colored main field, same split as a real
-       livery (black body, accent-color stripe) instead of one wash. */
     section[data-testid="stSidebar"] {{
         background: #141414;
         border-right: 2px solid {_accent};
@@ -603,12 +566,6 @@ st.markdown(
         box-shadow: 0 0 0 3px rgba(255,147,18,0.4);
     }}
 
-    /* Real Streamlit bordered containers (st.container(border=True, key=...))
-       used for the Navigation/Chat panels - styled directly instead of a
-       hand-rolled div, so header + content always nest correctly. Targeted
-       via the stable `.st-key-<key>` class Streamlit generates for a keyed
-       container (not the fragile "cache-0" class-name trick, which only
-       worked on some Streamlit versions and broke on Streamlit Cloud's). */
     .st-key-nav_card > div, .st-key-chat_card > div {{
         background: #FFFFFF;
         border: none !important;
@@ -651,7 +608,6 @@ st.markdown(
     }}
     .adx-bubble.user .tag {{ color: #E4E9FF; }}
 
-    /* Streamlit chat input */
     [data-testid="stChatInput"] textarea {{
         background: #F8FAFF !important;
         border: 1px solid #E4E9FF !important;
@@ -696,25 +652,12 @@ def fa_icon(name: str, color: str, size: int = 18) -> str:
 def icon_span(html: str) -> str:
     return f'<span style="display:inline-flex; align-items:center;">{html}</span>'
 
-def logo_badge(size: int = 52) -> str:
-    """Rounded-square gradient app-icon badge, holding a car glyph from Font
-    Awesome - an original mark, not a reuse of any third-party app icon."""
-    inner = int(size * 0.5)
-    return f"""<div style="
-        width:{size}px; height:{size}px; border-radius:{size * 0.26}px;
-        background: linear-gradient(135deg, {_accent} 0%, {_accent2} 130%);
-        display:flex; align-items:center; justify-content:center;
-        box-shadow: 0 6px 16px rgba(0,0,0,0.35);
-        flex-shrink:0;">
-        {fa_icon('fa-car-side', '#FFFFFF', inner)}
-    </div>"""
-
 # -----------------------------------------------------------------------
 # MAIN LAYOUT
 # -----------------------------------------------------------------------
 st.markdown(
     f"""
-    <div class="adx-hero">{logo_badge(52)}<h1>AI DRIVER <span class="accent">APP</span></h1></div>
+    <div class="adx-hero"><h1>AI DRIVER <span class="accent">APP</span></h1></div>
     <div class="adx-subtitle"><span class="adx-status-dot"></span>Online &middot; {st.session_state.brand} companion mode</div>
     """,
     unsafe_allow_html=True,
@@ -751,24 +694,22 @@ with col_chat:
                 unsafe_allow_html=True,
             )
 
-    qp = st.query_params
-    voice_text = qp.get("voice")
-    auto_relisten = qp.get("relisten") == "1"
-    # Hands-free: also auto-start on the very first load (no history yet),
-    # not just after each reply, so there's nothing to tap after the
-    # initial mic-permission prompt.
-    first_load_auto = st.session_state.hands_free and not st.session_state.history and not voice_text
-
-    mic_button(auto_start=auto_relisten or first_load_auto, accent=_accent)
+    if st.session_state.pending_capture and st.session_state.mic_unlocked:
+        st.caption("🎙️ Listening...")
+        delay_ms = min(max(st.session_state.last_reply_words * 350, 900), 6000)
+        voice_text = capture_voice(delay_ms=delay_ms)
+        st.session_state.pending_capture = False
+    else:
+        voice_text = ""
+        if st.button("🎤 Tap to talk", use_container_width=True):
+            st.session_state.mic_unlocked = True
+            voice_text = capture_voice(delay_ms=0)
 
     typed_text = st.chat_input("Or type here...")
 
     incoming = voice_text or typed_text
 
     if incoming:
-        if voice_text or auto_relisten:
-            st.query_params.clear()  # consume the query params so they don't replay on the next rerun
-
         cleaned_text = incoming.strip()
         st.session_state.history.append({"role": "user", "content": cleaned_text})
 
@@ -801,10 +742,10 @@ with col_chat:
                 "reply": reply,
             })
 
-            speak(
-                reply,
-                hands_free=st.session_state.hands_free,
-                elevenlabs_key=elevenlabs_key,
-                elevenlabs_voice_id=elevenlabs_voice_id,
-            )
+            speak(reply, elevenlabs_key=elevenlabs_key, elevenlabs_voice_id=elevenlabs_voice_id)
+            st.session_state.last_reply_words = len(reply.split())
+
+            if st.session_state.hands_free and st.session_state.mic_unlocked:
+                st.session_state.pending_capture = True
+
             st.rerun()
